@@ -17,7 +17,7 @@ class DataSet:
     def __init__(self, name, input_, field_mapping,
                  file_subset=None, test_size=0.25,
                  tokenizer=None, na_rm=True, train_input=None,
-                 valid_input=None):
+                 test_input=None):
 
         # Store inputs
         self.name = name
@@ -26,35 +26,35 @@ class DataSet:
         self.file_subset = file_subset
         self.tokenizer = tokenizer
         self.input_ = input_
-        self.train_input, self.valid_input = train_input, valid_input
+        self.train_input, self.test_input = train_input, test_input
 
         if input_ is not None:
             self.df = self.read_transform(input_)
             if na_rm:
                 self.df.dropna(inplace=True)
             self.df.reset_index(inplace=True, drop=True)
-            self.train_idxs, self.valid_idxs = train_test_split(
+            self.train_idxs, self.test_idxs = train_test_split(
                     range(len(self)), test_size=test_size)
 
         elif train_input is not None:
             if input_ is not None:
                 raise ValueError('Pleas only specify either `input_` or '
                                  '`train_input`')
-            if valid_input is None:
+            if test_input is None:
                 raise ValueError('Please pass data as `input_` if not '
                                  'specifying both `train_input` and '
-                                 '`valid_input`')
+                                 '`test_input`')
             train_df = self.read_transform(train_input)
-            valid_df = self.read_transform(valid_input)
-            self.df = train_df.append(valid_df)
+            test_df = self.read_transform(test_input)
+            self.df = train_df.append(test_df)
             self.df.reset_index(inplace=True, drop=True)
             if na_rm:
                 self.df.dropna(inplace=True)
             self.train_idxs = list(range(train_df.shape[0]))
-            self.valid_idxs = list(range(train_df.shape[0],
-                                         train_df.shape[0] + valid_df.shape[0]))
+            self.test_idxs = list(range(train_df.shape[0],
+                                         train_df.shape[0] + test_df.shape[0]))
         else:
-            raise ValueError('Either `input_` or (`train_input`, `valid_input`)'
+            raise ValueError('Either `input_` or (`train_input`, `test_input`)'
                              ' have to be specified.')
     def __len__(self):
         return self.df.shape[0]
@@ -64,8 +64,8 @@ class DataSet:
         return self.df.iloc[self.train_idxs]
 
     @property
-    def df_valid(self):
-        return self.df.iloc[self.valid_idxs]
+    def df_test(self):
+        return self.df.iloc[self.test_idxs]
 
     def n_tokens(self):
         '''
@@ -73,24 +73,24 @@ class DataSet:
         When randomize searching for the optimal parameter, max_df >= 0.8,
         min_df <= 5
         '''
-        vectorizer = CountVectorizer(ngram_range=(1, 1), max_df=0.80, min_df=5,
-                                     tokenizer=self.tokenizer.tokenize)
+        vectorizer = CountVectorizer(ngram_range=(1, 1), max_df=1, min_df=1,
+                                     tokenizer=self.tokenizer)
         grams = vectorizer.fit_transform(self.df['text'])
         return len(vectorizer.get_feature_names())
 
     def get_texts(self, set_):
         if set_ == "train":
             return self.df_train['text' ]
-        elif set_ == 'valid':
-            return self.df_valid['text']
+        elif set_ == 'test':
+            return self.df_test['text']
 
     def get_labels(self, set_):
         if set_ == 'train':
             return self.df['label'].iloc[self.train_idxs].astype(str)
-        elif set_ == 'valid':
-            return self.df['label'].iloc[self.valid_idxs].astype(str)
+        elif set_ == 'test':
+            return self.df['label'].iloc[self.test_idxs].astype(str)
         else:
-            raise ValueError("set_ must be one of ['train', 'valid']")
+            raise ValueError("set_ must be one of ['train', 'test']")
 
     def read_transform(self, input_):
         '''Read input data and transform to common format
@@ -116,11 +116,11 @@ class DataSet:
         return df
 
     def read_from_df(self, input_df):
-        self.df = copy.copy(input_df[[self.field_mapping['label'],
-                                      self.field_mapping['text']]])
-        self.df.columns = ['label', 'text']
-        self.df.reset_index(inplace=True, drop=True)
-        return(out)
+        out = copy.copy(input_df[[self.field_mapping['label'],
+                                  self.field_mapping['text']]])
+        out.columns = ['label', 'text']
+        out.reset_index(inplace=True, drop=True)
+        return out
 
     def read_from_delim(self, inpath, delim):
         df = pd.read_csv(inpath, delimiter=delim)
