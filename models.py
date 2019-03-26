@@ -59,7 +59,7 @@ class TextClfPipeline:
             self.classifier = RandomForestClassifier()
             self.params.update({'clf__n_estimators': sp.stats.randint(10, 100),
                                 'clf__max_features': sp.stats.randint(1, 11)})
-        elif self.algorithm == 'lasso':
+        elif self.algorithm == 'elasticnet':
             self.classifier = SGDClassifier(loss='log', penalty='elasticnet',
                                             max_iter=1000, tol=1e-3)
             self.params.update({'clf__alpha': sp.stats.uniform(0.0001, 0.01),
