@@ -7,6 +7,7 @@ Authors: Michael Fengyuan Liu, Fridolin Linder
 import pickle
 import os
 import multiprocessing
+import logging
 import scipy as sp
 import numpy as np
 
@@ -23,6 +24,170 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import StandardScaler
 
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+
+class TextClfPipeline:
+    '''Abstraction that creates a sklearn pipeline based on some simple
+    parameters
+    '''
+    def __init__(self, dataset, algorithm, feature_set,
+                 max_n_features, embedding_model=None,
+                 cache_dir='feature_cache/', recompute_features=False):
+        self.algorithm = algorithm
+        self.dataset = dataset
+        self.max_n_features = max_n_features
+        self.cache_dir=cache_dir
+        self.embedding_model=embedding_model
+        self.feature_set=feature_set
+        self.recompute_features=recompute_features
+
+        if feature_set == 'char_ngrams':
+            self.params = {
+                'vectorize__ngram_range': [(3, 3), (3, 4), (3, 5)],
+            }
+        elif feature_set == 'word_ngrams':
+            self.params = {
+                'vectorize__ngram_range': [(1, 1), (1, 2), (1, 3)],
+            }
+        elif feature_set == 'embeddings':
+            self.params = {
+                'vectorize__pooling_method': ['mean', 'max']
+            }
+
+        # classifiers
+        if self.algorithm == 'random_forest':
+            self.classifier = RandomForestClassifier()
+            self.params.update({'clf__n_estimators': sp.stats.randint(10, 100),
+                                'clf__max_features': sp.stats.randint(1, 11)})
+        elif self.algorithm == 'lasso':
+            self.classifier = SGDClassifier(loss='log', penalty='elasticnet',
+                                            max_iter=1000, tol=1e-3)
+            self.params.update({'clf__alpha': sp.stats.uniform(0.0001, 0.01),
+                                'clf__l1_ratio': sp.stats.uniform(0, 1)})
+        elif self.algorithm == 'naive_bayes':
+            self.classifier = GaussianNB()
+            self.params.update({'clf__var_smoothing': sp.stats.uniform(1e-12,
+                                                                       1e-6)})
+        elif self.algorithm == "svm":
+            self.classifier = SVC()
+            self.params.update({'clf__gamma': sp.stats.uniform(1e-3, 1e3),
+                                'clf__C': sp.stats.uniform(1e-2, 1e2),
+                                'clf__kernel': ['linear', 'rbf'],
+                                'clf__tol': sp.stats.uniform(1e-1, 1e-5)})
+        else:
+            raise ValueError("classifiers must be one of ['naive_bayes', 'lass"
+                             "o', 'random_forest', 'svm']")
+
+        # Assemble Pipeline
+        if feature_set == 'embeddings':
+            self.pipeline = Pipeline([
+                ('vectorize', PrecomputeVectorizer(dataset=self.dataset, 
+                                                   feature_set=feature_set,
+                                                   cache_dir=self.cache_dir)),
+                #('scale', StandardScaler(copy=True, with_mean=True, 
+                #                         with_std=True)),
+                ('clf', self.classifier)])
+        else:
+            self.pipeline = Pipeline([
+                ('vectorize', PrecomputeVectorizer(dataset=self.dataset, 
+                                                   feature_set=feature_set,
+                                                   cache_dir=self.cache_dir)),
+                ('reduce', Chi2Reducer(max_n_features=self.max_n_features)),
+                #('scale', StandardScaler(copy=True, with_mean=True, 
+                #                         with_std=True)),
+                ('clf', self.classifier)])
+
+        # Precompute features
+        self.precompute_features()
+
+    def precompute_features(self):
+        '''
+        Precompute and store feature matrices to cache
+
+        Compute the following feature matrices depending on the pipeline feature
+        arugment:
+        - Word grams (1 to 6 separate file each)
+        - Character grams (1 to 6)
+        - Embeddings (two matrices with `max` and `mean` pooled embeddings)
+
+        Returns:
+        -----------
+        Stores one file per feature matrix in `cache_dir`
+        '''
+        if not os.path.exists(self.cache_dir):
+            os.mkdir(self.cache_dir)
+        X = self.dataset.df['text']
+
+        # Precompute bag-of-words/chars features.
+        if self.feature_set == 'word_ngrams':
+            for ngram in range(1, 4):
+                ana = 'word'
+                fname = os.path.join(self.cache_dir, 
+                                     f'{self.dataset.name}_{ana}_{ngram}.npz')
+                if not os.path.isfile(fname) or self.recompute_features:
+                    logging.info(f'Precomputing {self.feature_set} ({ngram})...')
+                    cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
+                                         analyzer=ana, 
+                                         ngram_range=(ngram, ngram))
+                    transX = cv.fit_transform(X)
+                    sparse.save_npz(fname, transX)
+                else:
+                    logging.info(f'Using precomputed features for '
+                                 f'{self.feature_set} ({ngram})...')
+
+
+        elif self.feature_set == 'char_ngrams':
+            for ngram in range(3, 6):
+                ana = 'char_wb'
+                fname = os.path.join(self.cache_dir, 
+                                     f'{self.dataset.name}_{ana}_{ngram}.npz')
+                if not os.path.isfile(fname) or self.recompute_features:
+                    logging.info(f'Precomputing {self.feature_set} ({ngram})')
+                    cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
+                                         analyzer=ana, 
+                                         ngram_range=(ngram, ngram))
+                    transX = cv.fit_transform(X)
+                    sparse.save_npz(fname, transX)
+                else:
+                    logging.info(f'Using precomputed features for '
+                                 f'{self.feature_set} ({ngram})')
+
+        elif self.feature_set == 'embeddings':
+            # TODO: this should not be hardcoded
+            em_name = 'fasttext'
+            em = None
+            # Precomput the embedded documents
+            for pooling in ['mean', 'max']:
+                fname = os.path.join(
+                        self.cache_dir, 
+                        (f'{self.dataset.name}_{em_name}_{pooling}_'
+                         'embedded.p')
+                        )
+                if not os.path.isfile(fname) or self.recompute_features:
+                    if em is None: 
+                        logging.info(f'Loading {em_name} embedding model...')
+                        em = FastText.load(self.embedding_model)
+                    logging.info(f'Precomputing {pooling}-pooled embeddings...')
+                    X_out = []
+                    for i, doc in enumerate(X):
+                        tokens = self.dataset.tokenizer(doc)
+                        vecs = []
+                        for t in tokens:
+                            try:
+                                vecs.append(em.wv[t])
+                            # no char ngram of the work can be found
+                            except KeyError:
+                                continue
+                        if pooling == 'mean':
+                            X_out.append(np.mean(vecs, axis=0))
+                        else:
+                            X_out.append(np.max(vecs, axis=0))
+
+                    X_out = np.array(X_out)
+                    pickle.dump(X_out, open(fname, 'wb'))
+                else:
+                    logging.info(f'Using precomputed features for '
+                                 f'{pooling}-pooled embeddings')
 
 class Chi2Reducer(TransformerMixin, BaseEstimator):
     '''Estimator that reduces the number of features by
@@ -146,153 +311,4 @@ class PrecomputeVectorizer(CountVectorizer):
     def transform(self, rawdocuments):
         return self.fit_transform(rawdocuments)
 
-class TextClfPipeline:
-    '''
-    '''
-    def __init__(self, dataset, algorithm, feature_set,
-                 max_n_features, embedding_model=None,
-                 cache_dir='feature_cache/', recompute_features=False):
-        self.algorithm = algorithm
-        self.dataset = dataset
-        self.max_n_features = max_n_features
-        self.cache_dir=cache_dir
-        self.embedding_model=embedding_model
-        self.feature_set=feature_set
-        self.recompute_features=recompute_features
 
-        if feature_set == 'char_ngrams':
-            self.params = {
-                'vectorize__ngram_range': [(3, 3), (3, 4), (3, 5)],
-            }
-        elif feature_set == 'word_ngrams':
-            self.params = {
-                'vectorize__ngram_range': [(1, 1), (1, 2), (1, 3)],
-            }
-        elif feature_set == 'embeddings':
-            self.params = {
-                'vectorize__pooling_method': ['mean', 'max']
-            }
-
-        # classifiers
-        if self.algorithm == 'random_forest':
-            self.classifier = RandomForestClassifier()
-            self.params.update({'clf__n_estimators': sp.stats.randint(10, 100),
-                                'clf__max_features': sp.stats.randint(1, 11)})
-        elif self.algorithm == 'lasso':
-            self.classifier = SGDClassifier(loss='log', penalty='elasticnet',
-                                            max_iter=1000, tol=1e-3)
-            self.params.update({'clf__alpha': sp.stats.uniform(0.0001, 0.01),
-                                'clf__l1_ratio': sp.stats.uniform(0, 1)})
-        elif self.algorithm == 'naive_bayes':
-            self.classifier = GaussianNB()
-            self.params.update({'clf__var_smoothing': sp.stats.uniform(1e-12,
-                                                                       1e-6)})
-        elif self.algorithm == "svm":
-            self.classifier = SVC()
-            self.params.update({'clf__gamma': sp.stats.uniform(1e-3, 1e3),
-                                'clf__C': sp.stats.uniform(1e-2, 1e2),
-                                'clf__kernel': ['linear', 'rbf'],
-                                'clf__tol': sp.stats.uniform(1e-1, 1e-5)})
-        else:
-            raise ValueError("classifiers must be one of ['naive_bayes', 'lass"
-                             "o', 'random_forest', 'svm']")
-
-        # Assemble Pipeline
-        if feature_set == 'embeddings':
-            self.pipeline = Pipeline([
-                ('vectorize', PrecomputeVectorizer(dataset=self.dataset, 
-                                                   feature_set=feature_set,
-                                                   cache_dir=self.cache_dir)),
-                #('scale', StandardScaler(copy=True, with_mean=True, 
-                #                         with_std=True)),
-                ('clf', self.classifier)])
-        else:
-            self.pipeline = Pipeline([
-                ('vectorize', PrecomputeVectorizer(dataset=self.dataset, 
-                                                   feature_set=feature_set,
-                                                   cache_dir=self.cache_dir)),
-                ('reduce', Chi2Reducer(max_n_features=self.max_n_features)),
-                #('scale', StandardScaler(copy=True, with_mean=True, 
-                #                         with_std=True)),
-                ('clf', self.classifier)])
-
-        # Precompute features
-        self.precompute_features()
-
-    def precompute_features(self):
-        '''
-        Precompute and store feature matrices to cache
-
-        Compute the following feature matrices depending on the pipeline feature
-        arugment:
-        - Word grams (1 to 6 separate file each)
-        - Character grams (1 to 6)
-        - Embeddings (two matrices with `max` and `mean` pooled embeddings)
-
-        Returns:
-        -----------
-        Stores one file per feature matrix in `cache_dir`
-        '''
-        if not os.path.exists(self.cache_dir):
-            os.mkdir(self.cache_dir)
-        X = self.dataset.df['text']
-
-        # Precompute bag-of-words/chars features.
-        if self.feature_set == 'word_ngrams':
-            for ngram in range(1, 4):
-                ana = 'word'
-                fname = os.path.join(self.cache_dir, 
-                                     f'{self.dataset.name}_{ana}_{ngram}.npz')
-                if not os.path.isfile(fname) or self.recompute_features:
-                    print(f'Precomputing {self.feature_set}...')
-                    cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
-                                         analyzer=ana, 
-                                         ngram_range=(ngram, ngram))
-                    transX = cv.fit_transform(X)
-                    sparse.save_npz(fname, transX)
-        elif self.feature_set == 'char_ngrams':
-            for ngram in range(3, 6):
-                ana = 'char_wb'
-                fname = os.path.join(self.cache_dir, 
-                                     f'{self.dataset.name}_{ana}_{ngram}.npz')
-                if not os.path.isfile(fname) or self.recompute_features:
-                    print(f'Precomputing {self.feature_set}...')
-                    cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
-                                         analyzer=ana, 
-                                         ngram_range=(ngram, ngram))
-                    transX = cv.fit_transform(X)
-                    sparse.save_npz(fname, transX)
-
-        elif self.feature_set == 'embeddings':
-            # TODO: this should not be hardcoded
-            em_name = 'fasttext'
-            em = None
-            # Precomput the embedded documents
-            for pooling in ['mean', 'max']:
-                fname = os.path.join(
-                        self.cache_dir, 
-                        (f'{self.dataset.name}_{em_name}_{pooling}_'
-                         'embedded.p')
-                        )
-                if not os.path.isfile(fname) or self.recompute_features:
-                    if em is None: 
-                        print(f'Loading {em_name} embedding model...')
-                        em = FastText.load(self.embedding_model)
-                    print(f'Precomputing {pooling}-pooled embeddings...')
-                    X_out = []
-                    for i, doc in enumerate(X):
-                        tokens = self.dataset.tokenizer(doc)
-                        vecs = []
-                        for t in tokens:
-                            try:
-                                vecs.append(em.wv[t])
-                            # no char ngram of the work can be found
-                            except KeyError:
-                                continue
-                        if pooling == 'mean':
-                            X_out.append(np.mean(vecs, axis=0))
-                        else:
-                            X_out.append(np.max(vecs, axis=0))
-
-                    X_out = np.array(X_out)
-                    pickle.dump(X_out, open(fname, 'wb'))
