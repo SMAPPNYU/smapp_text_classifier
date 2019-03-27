@@ -26,9 +26,31 @@ from sklearn.preprocessing import StandardScaler
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 
-class TextClfPipeline:
-    '''Abstraction that creates a sklearn pipeline based on some simple
-    parameters
+class TextClassifier:
+    '''Abstraction that creates a sklearn pipeline
+
+    Attributes:
+    ----------
+    dataset: object of class DataSet
+    algorithm: str, one of ['random_forest', 'svm', 'elasticnet', 'naive_bayes']
+    feature_set: str, one of ['embeddings', 'char_ngrams', 'word_ngrams']
+    max_n_features: int, maximum number of features to retain from Chi2Reducer.
+        Not relevant for embeddings since embedding dimensionality is usually
+        much smaller than common bag-of-words feature set sizes.
+    embedding_model: tuple(2), (str: name, str: model path), name and path to
+        the fasttext embedding model (other embedding models are currently not
+        supported). Only required if `feature_set='embeddings'`. The embedding
+        model file needs to have one of two file extensions: `.bin` for fasttext
+        format or `.model` for gensim format. If the model is in gensim format,
+        all additionally required auxiliary files have to be in the same
+        directory. See the gensim documentation for more information.
+    cache_dir: str, directory to cache precomputed features
+    recompute_features: bool, should feature matrices be re-computed even if
+        they already exist in `cache_dir`?
+
+    Methods:
+    ----------
+    precompute_features
     '''
     def __init__(self, dataset, algorithm, feature_set,
                  max_n_features, embedding_model=None,
@@ -75,17 +97,17 @@ class TextClfPipeline:
                                 'clf__kernel': ['linear', 'rbf'],
                                 'clf__tol': sp.stats.uniform(1e-1, 1e-5)})
         else:
-            raise ValueError("classifiers must be one of ['naive_bayes', 'lass"
-                             "o', 'random_forest', 'svm']")
+            raise ValueError("classifiers must be one of ['naive_bayes', 'elast"
+                             "icnet', 'random_forest', 'svm']")
 
         # Assemble Pipeline
         if feature_set == 'embeddings':
             self.pipeline = Pipeline([
-                ('vectorize', PrecomputeVectorizer(dataset=self.dataset, 
-                                                   feature_set=feature_set,
-                                                   cache_dir=self.cache_dir)),
-                #('scale', StandardScaler(copy=True, with_mean=True, 
-                #                         with_std=True)),
+                ('vectorize', PrecomputeVectorizer(
+                    dataset=self.dataset, 
+                    feature_set=feature_set,
+                    cache_dir=self.cache_dir,
+                    embedding_model_name=self.embedding_model[0])),
                 ('clf', self.classifier)])
         else:
             self.pipeline = Pipeline([
@@ -93,8 +115,6 @@ class TextClfPipeline:
                                                    feature_set=feature_set,
                                                    cache_dir=self.cache_dir)),
                 ('reduce', Chi2Reducer(max_n_features=self.max_n_features)),
-                #('scale', StandardScaler(copy=True, with_mean=True, 
-                #                         with_std=True)),
                 ('clf', self.classifier)])
 
         # Precompute features
@@ -153,8 +173,7 @@ class TextClfPipeline:
                                  f'{self.feature_set} ({ngram})')
 
         elif self.feature_set == 'embeddings':
-            # TODO: this should not be hardcoded
-            em_name = 'fasttext'
+            em_name = self.embedding_model[0]
             em = None
             # Precomput the embedded documents
             for pooling in ['mean', 'max']:
@@ -166,7 +185,14 @@ class TextClfPipeline:
                 if not os.path.isfile(fname) or self.recompute_features:
                     if em is None: 
                         logging.info(f'Loading {em_name} embedding model...')
-                        em = FastText.load(self.embedding_model)
+                        if self.embedding_model[1].endswith('.model'):
+                            # Load gensim format
+                            em = FastText.load(self.embedding_model[1])
+                        else:
+                            # Load fasttext format
+                            em = FastText.load_fasttext_format(
+                                    self.embedding_model[1]
+                                    )
                     logging.info(f'Precomputing {pooling}-pooled embeddings...')
                     X_out = []
                     for i, doc in enumerate(X):
@@ -270,7 +296,7 @@ class PrecomputeVectorizer(CountVectorizer):
     '''
 
     def __init__(self, dataset, feature_set, cache_dir=None, ngram_range=None,
-                 pooling_method=None):
+                 pooling_method=None, embedding_model_name=None):
         self.dataset = dataset
         if feature_set == 'char_ngrams':
             self.analyzer = 'char_wb'
@@ -280,6 +306,7 @@ class PrecomputeVectorizer(CountVectorizer):
         self.ngram_range = ngram_range
         self.pooling_method = pooling_method
         self.cache_dir = cache_dir
+        self.embedding_model_name = embedding_model_name
 
     def fit_transform(self, rawdocuments, y=None):
         if self.feature_set in ['char_ngrams', 'word_ngrams']:
@@ -299,10 +326,10 @@ class PrecomputeVectorizer(CountVectorizer):
 
                 X = sparse.hstack([X, X1])
         elif self.feature_set == 'embeddings':
-            mat_path = os.path.join(self.cache_dir, (f'{self.dataset.name}_'
-                                                     f'fasttext_'
-                                                     f'{self.pooling_method}_'
-                                                     f'embedded.p'))
+            mat_path = os.path.join(
+                    self.cache_dir, 
+                    (f'{self.dataset.name}_{self.embedding_model_name}_'
+                     f'{self.pooling_method}_embedded.p'))
             X = pickle.load(open(mat_path, 'rb'))
             X = X[rawdocuments.index, ]
 
