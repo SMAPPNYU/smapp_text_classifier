@@ -247,7 +247,7 @@ class Chi2Reducer(TransformerMixin, BaseEstimator):
 
 class DictionaryModel:
     '''
-    A high level wrapper around vaderSentiment packageself.
+    A high level wrapper around vaderSentiment package.
 
     tokenizer: function that tokenizes string
     model: specifies which dictionary model is applied. Only 'vader' is

@@ -18,7 +18,8 @@ setuptools.setup(
             'gensim',
             'scikit-learn',
             'pandas',
-            'numpy'
+            'numpy',
+            'vadersentiment'
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
