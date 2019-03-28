@@ -9,3 +9,8 @@
 
 # Vim temporary files
 *.swp
+
+# Large embedding files and feature matrices from pipeline demo
+pipeline_demo/embedding_models/
+pipeline_demo/feature_cache/
+pipeline_demo/.ipynb_checkpoints/
