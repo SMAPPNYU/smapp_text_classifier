@@ -14,7 +14,6 @@ setuptools.setup(
     url="https://github.com/smappnyu/smapp_text_classifier",
     packages=setuptools.find_packages(),
     install_requires=[
-            'spacy',
             'gensim',
             'scikit-learn',
             'pandas',
