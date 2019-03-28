@@ -12,7 +12,7 @@ pip install git+https://github.com/smappnyu/smapp_text_classifier.git
 
 This is a bare bones example. For a more extensive executable notebook see `/pipeline_demo`.
 
-```{python}
+```python
 from smapp_text_clf.data import DataSet
 from smapp_text_clf.models import TextClassifier
 
