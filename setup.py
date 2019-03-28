@@ -13,6 +13,13 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/smappnyu/smapp_text_classifier",
     packages=setuptools.find_packages(),
+    install_requires=[
+            'spacy',
+            'gensim',
+            'scikit-learn',
+            'pandas',
+            'numpy'
+    ],
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
