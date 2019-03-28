@@ -59,7 +59,7 @@ class TextClassifier:
         `cache_dir`
     '''
     def __init__(self, dataset, algorithm, feature_set,
-                 max_n_features, embedding_model=None,
+                 max_n_features=20000, embedding_model=None,
                  cache_dir='feature_cache/', recompute_features=False,
                  ngram_range=None):
         self.algorithm = algorithm
