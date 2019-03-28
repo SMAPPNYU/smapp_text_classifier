@@ -14,10 +14,10 @@ class DataSet:
     tokenizer: must contain a `tokenize(string)` method
     '''
 
-    def __init__(self, name, input_, field_mapping,
+    def __init__(self, name, field_mapping,
                  file_subset=None, test_size=0.25,
                  tokenizer=None, na_rm=True, train_input=None,
-                 test_input=None):
+                 test_input=None, input_=None):
 
         # Store inputs
         self.name = name
