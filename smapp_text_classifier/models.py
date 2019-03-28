@@ -27,7 +27,7 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 
 class TextClassifier:
-    '''Abstraction that creates a sklearn pipeline
+    '''Abstraction that creates a sklearn pipeline and precomputes feature sets
 
     Attributes:
     ----------
@@ -37,7 +37,7 @@ class TextClassifier:
     max_n_features: int, maximum number of features to retain from Chi2Reducer.
         Not relevant for embeddings since embedding dimensionality is usually
         much smaller than common bag-of-words feature set sizes.
-    embedding_model: tuple(2), (str: name, str: model path), name and path to
+    embedding_model: tuple(str, str), name and path to
         the fasttext embedding model (other embedding models are currently not
         supported). Only required if `feature_set='embeddings'`. The embedding
         model file needs to have one of two file extensions: `.bin` for fasttext
@@ -47,40 +47,62 @@ class TextClassifier:
     cache_dir: str, directory to cache precomputed features
     recompute_features: bool, should feature matrices be re-computed even if
         they already exist in `cache_dir`?
+    ngram_range: tuple(int, int), range of n_gram matrices to compute. The
+        pipeline will cross validate over all ranges from shortest to longest.
+        E.g. if `ngram_range=(1,3)` the following combinations of n-grams are 
+        used as feature sets: 1) only 1-grams 2) 1 and 2-grams, 3) 1, 2 and
+        3-grams.
 
     Methods:
     ----------
-    precompute_features
+    precompute_features: Creates all feature matrices and stores them in
+        `cache_dir`
     '''
     def __init__(self, dataset, algorithm, feature_set,
                  max_n_features, embedding_model=None,
-                 cache_dir='feature_cache/', recompute_features=False):
+                 cache_dir='feature_cache/', recompute_features=False,
+                 ngram_range=None):
         self.algorithm = algorithm
         self.dataset = dataset
         self.max_n_features = max_n_features
-        self.cache_dir=cache_dir
-        self.embedding_model=embedding_model
+        self.cache_dir = cache_dir
+        self.embedding_model = embedding_model
         self.feature_set=feature_set
-        self.recompute_features=recompute_features
+        self.recompute_features = recompute_features
+        self.ngram_range = ngram_range
 
-        if feature_set == 'char_ngrams':
+        # If ngram range is not specified, set it to reasonable defaults
+        if self.ngram_range is None:
+            if self.feature_set == 'word_ngrams':
+                self.ngram_range = (1, 3)
+            if self.feature_set == 'char_ngrams':
+                self.ngram_range = (3, 5)
+        
+        # Create the tuning parameters for the vectorizer (ngram ranges and 
+        # pooling methods)
+        if 'ngrams' in feature_set:
+            ranges = [(self.ngram_range[0], x) 
+                      for x in range(self.ngram_range[0], 
+                                     self.ngram_range[1]+1)]
             self.params = {
-                'vectorize__ngram_range': [(3, 3), (3, 4), (3, 5)],
-            }
-        elif feature_set == 'word_ngrams':
-            self.params = {
-                'vectorize__ngram_range': [(1, 1), (1, 2), (1, 3)],
+                'vectorize__ngram_range': ranges,
             }
         elif feature_set == 'embeddings':
             self.params = {
                 'vectorize__pooling_method': ['mean', 'max']
             }
+        else:
+            raise ValueError("feature_set must be one of ['embeddings', "
+                             "'word_ngrams', 'char_ngrams']")
 
-        # classifiers
+        # Create the classifiers and set their tuning parameters
         if self.algorithm == 'random_forest':
-            self.classifier = RandomForestClassifier()
-            self.params.update({'clf__n_estimators': sp.stats.randint(10, 100),
-                                'clf__max_features': sp.stats.randint(1, 11)})
+            self.classifier = RandomForestClassifier(max_features='auto')
+            self.params.update(
+                    {'clf__n_estimators': sp.stats.randint(10, 500),
+                     'clf__min_samples_split': sp.stats.randint(2, 20)
+                    }
+            )
         elif self.algorithm == 'elasticnet':
             self.classifier = SGDClassifier(loss='log', penalty='elasticnet',
                                             max_iter=1000, tol=1e-3)
@@ -97,7 +119,7 @@ class TextClassifier:
                                 'clf__kernel': ['linear', 'rbf'],
                                 'clf__tol': sp.stats.uniform(1e-1, 1e-5)})
         else:
-            raise ValueError("classifiers must be one of ['naive_bayes', 'elast"
+            raise ValueError("`algorithm` must be one of ['naive_bayes', 'elast"
                              "icnet', 'random_forest', 'svm']")
 
         # Assemble Pipeline
@@ -137,51 +159,45 @@ class TextClassifier:
         if not os.path.exists(self.cache_dir):
             os.mkdir(self.cache_dir)
         X = self.dataset.df['text']
+            
+        # Select word or character n-gram settings
+        if 'ngrams' in self.feature_set:
+            analyzer = 'word' if 'word' in self.feature_set else 'char_wb'
 
-        # Precompute bag-of-words/chars features.
-        if self.feature_set == 'word_ngrams':
-            for ngram in range(1, 4):
-                ana = 'word'
-                fname = os.path.join(self.cache_dir, 
-                                     f'{self.dataset.name}_{ana}_{ngram}.npz')
+            # Precompute bag-of-words/chars features.
+            for ngram in range(self.ngram_range[0], self.ngram_range[1]+1):
+                # Construct filename for the cache file
+                fname = os.path.join(
+                        self.cache_dir, 
+                        f'{self.dataset.name}_{analyzer}_{ngram}.npz'
+                )
+                # Only recompute if file doesn't exist or features should be
+                # recomputed
                 if not os.path.isfile(fname) or self.recompute_features:
-                    logging.info(f'Precomputing {self.feature_set} ({ngram})...')
+                    logging.info(f'Precomputing {self.feature_set} ({ngram})..')
                     cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
-                                         analyzer=ana, 
-                                         ngram_range=(ngram, ngram))
+                                         analyzer=analyzer, 
+                                         ngram_range=(ngram, ngram),
+                                         min_df=1,
+                                         max_df=1)
                     transX = cv.fit_transform(X)
                     sparse.save_npz(fname, transX)
                 else:
                     logging.info(f'Using precomputed features for '
                                  f'{self.feature_set} ({ngram})...')
 
-
-        elif self.feature_set == 'char_ngrams':
-            for ngram in range(3, 6):
-                ana = 'char_wb'
-                fname = os.path.join(self.cache_dir, 
-                                     f'{self.dataset.name}_{ana}_{ngram}.npz')
-                if not os.path.isfile(fname) or self.recompute_features:
-                    logging.info(f'Precomputing {self.feature_set} ({ngram})')
-                    cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
-                                         analyzer=ana, 
-                                         ngram_range=(ngram, ngram))
-                    transX = cv.fit_transform(X)
-                    sparse.save_npz(fname, transX)
-                else:
-                    logging.info(f'Using precomputed features for '
-                                 f'{self.feature_set} ({ngram})')
-
         elif self.feature_set == 'embeddings':
             em_name = self.embedding_model[0]
             em = None
             # Precomput the embedded documents
             for pooling in ['mean', 'max']:
+                # Construct cache filename
                 fname = os.path.join(
                         self.cache_dir, 
                         (f'{self.dataset.name}_{em_name}_{pooling}_'
                          'embedded.p')
                         )
+
                 if not os.path.isfile(fname) or self.recompute_features:
                     if em is None: 
                         logging.info(f'Loading {em_name} embedding model...')
@@ -214,6 +230,11 @@ class TextClassifier:
                 else:
                     logging.info(f'Using precomputed features for '
                                  f'{pooling}-pooled embeddings')
+        else:
+            raise ValueError(f'feature_set {self.feature_set} not '
+                             'supported. Has to be one of ' 
+                             '["embeddings", "char_ngrams", "word_ngrams"]')
+
 
 class Chi2Reducer(TransformerMixin, BaseEstimator):
     '''Estimator that reduces the number of features by
@@ -247,7 +268,7 @@ class Chi2Reducer(TransformerMixin, BaseEstimator):
 
 class DictionaryModel:
     '''
-    A high level wrapper around vaderSentiment package.
+    A high level wrapper around vaderSentiment packageself.
 
     tokenizer: function that tokenizes string
     model: specifies which dictionary model is applied. Only 'vader' is
@@ -337,5 +358,3 @@ class PrecomputeVectorizer(CountVectorizer):
 
     def transform(self, rawdocuments):
         return self.fit_transform(rawdocuments)
-
-
