@@ -182,6 +182,11 @@ class TextClassifier:
                                          max_df=1)
                     transX = cv.fit_transform(X)
                     sparse.save_npz(fname, transX)
+                    voc_fname = os.path.join(
+                        self.cache_dir, 
+                        f'{self.dataset.name}_{analyzer}_{ngram}_vocab.pkl'
+                    )
+                    pickle.dump(cv.vocabulary_, open(voc_fname, 'wb'))
                 else:
                     logging.info(f'Using precomputed features for '
                                  f'{self.feature_set} ({ngram})...')
