@@ -106,7 +106,7 @@ class TextClassifier:
         elif self.algorithm == 'elasticnet':
             self.classifier = SGDClassifier(loss='log', penalty='elasticnet',
                                             max_iter=1000, tol=1e-3)
-            self.params.update({'clf__alpha': sp.stats.uniform(0.0001, 0.01),
+            self.params.update({'clf__alpha': sp.stats.uniform(0.00001, 0.01),
                                 'clf__l1_ratio': sp.stats.uniform(0, 1)})
         elif self.algorithm == 'naive_bayes':
             self.classifier = GaussianNB()
@@ -141,6 +141,7 @@ class TextClassifier:
 
         # Precompute features
         self.precompute_features()
+        
 
     def precompute_features(self):
         '''
@@ -178,8 +179,8 @@ class TextClassifier:
                     cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
                                          analyzer=analyzer, 
                                          ngram_range=(ngram, ngram),
-                                         min_df=1,
-                                         max_df=1)
+                                         min_df=2,
+                                         max_df=1.0)
                     transX = cv.fit_transform(X)
                     sparse.save_npz(fname, transX)
                     voc_fname = os.path.join(
@@ -334,7 +335,10 @@ class PrecomputeVectorizer(CountVectorizer):
         self.cache_dir = cache_dir
         self.embedding_model_name = embedding_model_name
 
-    def fit_transform(self, rawdocuments, y=None):
+    def fit(self):
+        return self
+    
+    def transform(self, rawdocuments, y=None):
         if self.feature_set in ['char_ngrams', 'word_ngrams']:
             # load and concatenate document-term matrices
             mat_path = os.path.join(self.cache_dir, (f'{self.dataset.name}_'
@@ -361,5 +365,5 @@ class PrecomputeVectorizer(CountVectorizer):
 
         return X
 
-    def transform(self, rawdocuments):
-        return self.fit_transform(rawdocuments)
+    def fit_transform(self, rawdocuments, y=None):
+        return self.transform(rawdocuments, y)
