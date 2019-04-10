@@ -10,6 +10,7 @@ import multiprocessing
 import logging
 import scipy as sp
 import numpy as np
+import warnings
 
 from gensim.models import FastText
 from scipy import sparse
@@ -246,20 +247,41 @@ class Chi2Reducer(TransformerMixin, BaseEstimator):
     '''Estimator that reduces the number of features by
     selecting the top predictive features according to
     chi^2 statistic (see sklearn.feature_selection.chi2)
-
+    
+    Attributes:
+    ----------
     max_n_features: Maximum numbers of features to return.
+    top_idxs: Vocabulary indices in order of chi2 importance.
+    self.p_values: P-values of chi2 test for each feature in the 
+        order of the occurence in X (columns).
     '''
     def __init__(self, max_n_features):
         self.max_n_features = int(max_n_features)
         self.top_idxs = None
+        self.p_values = None
+        
 
     def fit(self, X, y):
         '''Calculates chi2 statistics for all features in X'''
-        c2 = chi2(X, y)
-
-        sorted_features = sorted([(x, i) for i, x in enumerate(c2[0])],
+        
+        # Warnings are suppressed here because some features have zero occurence
+        # due to the train test split (the feature matrix is generated for the
+        # complete dataset, but the precompute vectorizer only returns rows for
+        # documents in the training/test set). These features are taken care of 
+        # explicitly later
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            c2 = chi2(X, y)
+        
+        # Set p-value of nan feature to 1 and chi2 statistic to 0
+        new_chi2 = [0 if np.isnan(x) else x for x in c2[0]]
+        new_pval = [1.0 if np.isnan(x) else x for x in c2[1]]
+            
+        sorted_features = sorted([(pval, idx) for idx, pval in enumerate(new_pval)],
                                  key=lambda x: x[0],
-                                 reverse=True)
+                                 reverse=False)
+        
+        self.p_values = [x[0] for x in sorted(sorted_features, key=lambda x: x[1])]
         top_features = sorted_features[:self.max_n_features]
         self.top_idxs = list(map(lambda x: x[1], top_features))
         return self
@@ -339,9 +361,10 @@ class PrecomputeVectorizer(CountVectorizer):
         return self
     
     def transform(self, rawdocuments, y=None):
-        
+        self.vocabulary = []
         if self.feature_set in ['char_ngrams', 'word_ngrams']:
             for pos, i in enumerate(range(self.ngram_range[0], self.ngram_range[1]+1)):
+                # Load the ith matrix and concatenate it to previous
                 mat_path = os.path.join(
                     self.cache_dir, 
                     f'{self.dataset.name}_{self.analyzer}_{i}.npz'
@@ -353,6 +376,14 @@ class PrecomputeVectorizer(CountVectorizer):
                     X1 = sparse.load_npz(mat_path)
                     X1 = X1[rawdocuments.index, ]
                     X = sparse.hstack([X, X1])
+                # Load the vocabulary corresponding to the ith matrix     
+                vocab_path = os.path.join(
+                    self.cache_dir,
+                    f'{self.dataset.name}_{self.analyzer}_{i}_vocab.pkl'
+                )
+                vocab_dict = pickle.load(open(vocab_path, 'rb'))
+                vocab = [x[0] for x in sorted(vocab_dict.items(), key=lambda x: x[1])] 
+                self.vocabulary.extend(vocab)
                     
         elif self.feature_set == 'embeddings':
             mat_path = os.path.join(
