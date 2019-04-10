@@ -339,22 +339,21 @@ class PrecomputeVectorizer(CountVectorizer):
         return self
     
     def transform(self, rawdocuments, y=None):
+        
         if self.feature_set in ['char_ngrams', 'word_ngrams']:
-            # load and concatenate document-term matrices
-            mat_path = os.path.join(self.cache_dir, (f'{self.dataset.name}_'
-                                                     f'{self.analyzer}_'
-                                                     f'{self.ngram_range[0]}'
-                                                     f'.npz'))
-            X = sparse.load_npz(mat_path)
-            X = X[rawdocuments.index, ]
-            for i in range(self.ngram_range[0]+1, self.ngram_range[1]+1):
-                mat_path = os.path.join(self.cache_dir, (f'{self.dataset.name}_'
-                                                         f'{self.analyzer}_'
-                                                         f'{i}.npz'))
-                X1 = sparse.load_npz(mat_path)
-                X1 = X1[rawdocuments.index, ]
-
-                X = sparse.hstack([X, X1])
+            for pos, i in enumerate(range(self.ngram_range[0], self.ngram_range[1]+1)):
+                mat_path = os.path.join(
+                    self.cache_dir, 
+                    f'{self.dataset.name}_{self.analyzer}_{i}.npz'
+                )
+                if pos == 0:
+                    X = sparse.load_npz(mat_path)
+                    X = X[rawdocuments.index, ]
+                else:
+                    X1 = sparse.load_npz(mat_path)
+                    X1 = X1[rawdocuments.index, ]
+                    X = sparse.hstack([X, X1])
+                    
         elif self.feature_set == 'embeddings':
             mat_path = os.path.join(
                     self.cache_dir, 
