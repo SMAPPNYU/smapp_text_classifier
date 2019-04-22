@@ -4,6 +4,7 @@ import copy
 
 import numpy as np
 import pandas as pd
+import spacy
 
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.model_selection import train_test_split
@@ -146,3 +147,15 @@ class DataSet:
                         out['text'].append(doc[self.field_mapping['text']])
 
         return pd.DataFrame(out)
+
+class SpacyTokenizer:
+    def __init__(self):
+        self.nlp = spacy.load('en', disable=['ner', 'parser', 'tagger'])
+
+    @staticmethod
+    def rescue_hashtags(token_list):
+        tokens = iter(token_list)
+        return([t + next(tokens, '') if t == '#' else t for t in tokens])
+
+    def tokenize(self, text):
+        return self.rescue_hashtags([x.orth_ for x in self.nlp(text)])
