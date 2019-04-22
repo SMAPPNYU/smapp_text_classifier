@@ -15,3 +15,7 @@ pipeline_demo/embedding_models/
 pipeline_demo/embedding_models_local/
 pipeline_demo/feature_cache/
 pipeline_demo/.ipynb_checkpoints/
+
+# data
+data
+data/*
