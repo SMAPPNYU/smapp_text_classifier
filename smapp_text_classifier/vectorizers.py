@@ -4,6 +4,7 @@ Author: Fridolin Linder
 import os
 import joblib
 import numpy as np
+import gensim
 
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.base import TransformerMixin, BaseEstimator
@@ -127,16 +128,16 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         self.dimensionality = None
         self.recompute = recompute
         super(BaseEstimator, self).__init__(self.cache_dir, self.recompute)
-        if tokenize is None:
-            self.tokenize = lambda x: x.split()
-        else:
-            self.tokenize = tokenize
+        self.tokenize = tokenize
         self.recompute = recompute
 
     @property
     def cache(self):
-        return (f'{self.ds_name}_{self.embedding_model_name}_'
-                f'{self.pooling_method}.pkl')
+        return os.path.join(
+            self.cache_dir, 
+            (f'{self.ds_name}_{self.embedding_model_name}_'
+             f'{self.pooling_method}.pkl')
+        )
 
     def fit(self, X):
         self.fit_transform(X)
@@ -147,21 +148,33 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
 
     def transform(self, X, y=None):
         try:
+            print('trying to load from cache')
             self._load_from_cache(self.cache)
             _check_X(X)
             return self.feature_matrix[X.index, ]
         except CacheError:
+            print('no cache or recompute')
+            print('loading embedding model')
             em = self._load_embedding_model()
+            print('embedding docs')
             self.feature_matrix = np.array([self._embed_doc(doc, em) 
                                             for doc in X])
+            print(f'dumping self to {self.cache}')
             joblib.dump(self, self.cache)
             return self.feature_matrix
 
     def _load_embedding_model(self):
-        if self.embedding_model_path.endswith('.model'):
-            em = FastText.load(self.embedding_model_path)
+        # Quick hack to allow passing of pre-loaded models
+        # TODO: change naming of attribute and update documentation
+        #       this might be a useful feature
+        if isinstance(self.embedding_model_path,
+                      gensim.models.fasttext.FastText):
+            em = self.embedding_model_path
         else:
-            em = FastText.load_fasttext_format(self.embedding_model_path)
+            if self.embedding_model_path.endswith('.model'):
+                em = FastText.load(self.embedding_model_path)
+            else:
+                em = FastText.load_fasttext_format(self.embedding_model_path)
         self.dimensionality = em.wv[em.wv.index2word[0]].shape[0]
         return em
 
