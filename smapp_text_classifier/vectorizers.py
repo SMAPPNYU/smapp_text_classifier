@@ -148,18 +148,13 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
 
     def transform(self, X, y=None):
         try:
-            print('trying to load from cache')
             self._load_from_cache(self.cache)
             _check_X(X)
             return self.feature_matrix[X.index, ]
         except CacheError:
-            print('no cache or recompute')
-            print('loading embedding model')
             em = self._load_embedding_model()
-            print('embedding docs')
             self.feature_matrix = np.array([self._embed_doc(doc, em) 
                                             for doc in X])
-            print(f'dumping self to {self.cache}')
             joblib.dump(self, self.cache)
             return self.feature_matrix
 
