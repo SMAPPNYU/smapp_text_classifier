@@ -50,7 +50,7 @@ class TextClassifier:
         they already exist in `cache_dir`?
     ngram_range: tuple(int, int), range of n_gram matrices to compute. The
         pipeline will cross validate over all ranges from shortest to longest.
-        E.g. if `ngram_range=(1,3)` the following combinations of n-grams are 
+        E.g. if `ngram_range=(1,3)` the following combinations of n-grams are
         used as feature sets: 1) only 1-grams 2) 1 and 2-grams, 3) 1, 2 and
         3-grams.
 
@@ -71,6 +71,7 @@ class TextClassifier:
         self.feature_set=feature_set
         self.recompute_features = recompute_features
         self.ngram_range = ngram_range
+        self.repr = f'{self.dataset.name}_{self.feature_set}_{self.algorithm}'
 
         # If ngram range is not specified, set it to reasonable defaults
         if self.ngram_range is None:
@@ -78,12 +79,12 @@ class TextClassifier:
                 self.ngram_range = (1, 3)
             if self.feature_set == 'char_ngrams':
                 self.ngram_range = (3, 5)
-        
-        # Create the tuning parameters for the vectorizer (ngram ranges and 
+
+        # Create the tuning parameters for the vectorizer (ngram ranges and
         # pooling methods)
         if 'ngrams' in feature_set:
-            ranges = [(self.ngram_range[0], x) 
-                      for x in range(self.ngram_range[0], 
+            ranges = [(self.ngram_range[0], x)
+                      for x in range(self.ngram_range[0],
                                      self.ngram_range[1]+1)]
             self.params = {
                 'vectorize__ngram_range': ranges,
@@ -127,14 +128,14 @@ class TextClassifier:
         if feature_set == 'embeddings':
             self.pipeline = Pipeline([
                 ('vectorize', PrecomputeVectorizer(
-                    dataset=self.dataset, 
+                    dataset=self.dataset,
                     feature_set=feature_set,
                     cache_dir=self.cache_dir,
                     embedding_model_name=self.embedding_model[0])),
                 ('clf', self.classifier)])
         else:
             self.pipeline = Pipeline([
-                ('vectorize', PrecomputeVectorizer(dataset=self.dataset, 
+                ('vectorize', PrecomputeVectorizer(dataset=self.dataset,
                                                    feature_set=feature_set,
                                                    cache_dir=self.cache_dir)),
                 ('reduce', Chi2Reducer(max_n_features=self.max_n_features)),
@@ -142,7 +143,13 @@ class TextClassifier:
 
         # Precompute features
         self.precompute_features()
-        
+
+
+    def __str__(self):
+        '''
+        return a string uniquely identify the combination of dataset, and feature set
+        '''
+        return self.repr
 
     def precompute_features(self):
         '''
@@ -161,7 +168,7 @@ class TextClassifier:
         if not os.path.exists(self.cache_dir):
             os.mkdir(self.cache_dir)
         X = self.dataset.df['text']
-            
+
         # Select word or character n-gram settings
         if 'ngrams' in self.feature_set:
             analyzer = 'word' if 'word' in self.feature_set else 'char_wb'
@@ -170,7 +177,7 @@ class TextClassifier:
             for ngram in range(self.ngram_range[0], self.ngram_range[1]+1):
                 # Construct filename for the cache file
                 fname = os.path.join(
-                        self.cache_dir, 
+                        self.cache_dir,
                         f'{self.dataset.name}_{analyzer}_{ngram}.npz'
                 )
                 # Only recompute if file doesn't exist or features should be
@@ -178,14 +185,14 @@ class TextClassifier:
                 if not os.path.isfile(fname) or self.recompute_features:
                     logging.info(f'Precomputing {self.feature_set} ({ngram})..')
                     cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
-                                         analyzer=analyzer, 
+                                         analyzer=analyzer,
                                          ngram_range=(ngram, ngram),
                                          min_df=2,
                                          max_df=1.0)
                     transX = cv.fit_transform(X)
                     sparse.save_npz(fname, transX)
                     voc_fname = os.path.join(
-                        self.cache_dir, 
+                        self.cache_dir,
                         f'{self.dataset.name}_{analyzer}_{ngram}_vocab.pkl'
                     )
                     pickle.dump(cv.vocabulary_, open(voc_fname, 'wb'))
@@ -199,14 +206,15 @@ class TextClassifier:
             # Precomput the embedded documents
             for pooling in ['mean', 'max']:
                 # Construct cache filename
+                self.repr += f'_{em_name}_{pooling}'
                 fname = os.path.join(
-                        self.cache_dir, 
+                        self.cache_dir,
                         (f'{self.dataset.name}_{em_name}_{pooling}_'
                          'embedded.p')
                         )
 
                 if not os.path.isfile(fname) or self.recompute_features:
-                    if em is None: 
+                    if em is None:
                         logging.info(f'Loading {em_name} embedding model...')
                         if self.embedding_model[1].endswith('.model'):
                             # Load gensim format
@@ -239,7 +247,7 @@ class TextClassifier:
                                  f'{pooling}-pooled embeddings')
         else:
             raise ValueError(f'feature_set {self.feature_set} not '
-                             'supported. Has to be one of ' 
+                             'supported. Has to be one of '
                              '["embeddings", "char_ngrams", "word_ngrams"]')
 
 
@@ -359,7 +367,7 @@ class PrecomputeVectorizer(CountVectorizer):
 
     def fit(self):
         return self
-    
+
     def transform(self, rawdocuments, y=None):
         self.vocabulary = []
         if self.feature_set in ['char_ngrams', 'word_ngrams']:
@@ -387,7 +395,7 @@ class PrecomputeVectorizer(CountVectorizer):
                     
         elif self.feature_set == 'embeddings':
             mat_path = os.path.join(
-                    self.cache_dir, 
+                    self.cache_dir,
                     (f'{self.dataset.name}_{self.embedding_model_name}_'
                      f'{self.pooling_method}_embedded.p'))
             X = pickle.load(open(mat_path, 'rb'))
