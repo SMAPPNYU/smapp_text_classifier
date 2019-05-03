@@ -11,6 +11,7 @@ import logging
 import scipy as sp
 import numpy as np
 import warnings
+import itertools
 
 from gensim.models import FastText
 from scipy import sparse
@@ -23,6 +24,9 @@ from sklearn.feature_selection import chi2
 from sklearn.base import TransformerMixin, BaseEstimator
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import StandardScaler
+
+from smapp_text_classifier.vectorizers import (CachedCountVectorizer, 
+                                               CachedEmbeddingVectorizer)
 
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
@@ -47,7 +51,9 @@ class TextClassifier:
         directory. See the gensim documentation for more information.
     cache_dir: str, directory to cache precomputed features
     recompute_features: bool, should feature matrices be re-computed even if
-        they already exist in `cache_dir`?
+        they already exist in `cache_dir`? Note that, for character and word
+        embeddings vectorizing from scratch might be faster than loading the
+        cached matrices. This depends on the size of the dataset.
     ngram_range: tuple(int, int), range of n_gram matrices to compute. The
         pipeline will cross validate over all ranges from shortest to longest.
         E.g. if `ngram_range=(1,3)` the following combinations of n-grams are
@@ -68,7 +74,7 @@ class TextClassifier:
         self.max_n_features = max_n_features
         self.cache_dir = cache_dir
         self.embedding_model = embedding_model
-        self.feature_set=feature_set
+        self.feature_set = feature_set
         self.recompute_features = recompute_features
         self.ngram_range = ngram_range
         self.repr = f'{self.dataset.name}_{self.feature_set}_{self.algorithm}'
@@ -124,131 +130,62 @@ class TextClassifier:
             raise ValueError("`algorithm` must be one of ['naive_bayes', 'elast"
                              "icnet', 'random_forest', 'svm']")
 
+
+        # Precompute features
+        # Before cross-validation each vectorizer has to be fit once to
+        # precompute features on the complete dataset (the data that is passed
+        # to the vectorizer during cross-validation is always missing one fold,
+        # therefore, an incomplete cache would be created of the data if caching
+        # was based on the first time a vectorizer is used in the
+        # cross-validation)
+
+        # Initialize the vectorizer depending on the requested feature type
+        print('precomputing')
+        if feature_set == 'embeddings':
+            vectorizer = CachedEmbeddingVectorizer(
+                cache_dir=self.cache_dir, 
+                ds_name=dataset.name,
+                embedding_model=self.embedding_model,
+                tokenize=dataset.tokenizer,
+                recompute=self.recompute_features,
+            )
+        else:
+            analyzer = 'word' if feature_set == 'word_ngrams' else 'char_wb'
+            vectorizer = CachedCountVectorizer(
+                cache_dir=self.cache_dir,
+                ds_name=dataset.name,
+                analyzer=analyzer,
+                recompute=self.recompute_features,
+            )
+
+        prefix = 'vectorize__'
+        vec_params = {k: v for k,v in self.params.items() 
+                      if k.startswith(prefix)}
+
+        for value_combo in itertools.product(*vec_params.values()):
+            par = {key[len(prefix):]: value_combo[i] 
+                   for i, key in enumerate(vec_params)}
+            vectorizer = vectorizer.set_params(**par)
+            vectorizer = vectorizer.fit(self.dataset.df.text)
+        vectorizer = vectorizer.set_params(recompute=self.recompute_features,
+                                           **{key: None for key in par})
+ 
         # Assemble Pipeline
         if feature_set == 'embeddings':
             self.pipeline = Pipeline([
-                ('vectorize', PrecomputeVectorizer(
-                    dataset=self.dataset,
-                    feature_set=feature_set,
-                    cache_dir=self.cache_dir,
-                    embedding_model_name=self.embedding_model[0])),
+                ('vectorize', vectorizer),
                 ('clf', self.classifier)])
         else:
             self.pipeline = Pipeline([
-                ('vectorize', PrecomputeVectorizer(dataset=self.dataset,
-                                                   feature_set=feature_set,
-                                                   cache_dir=self.cache_dir)),
+                ('vectorize', vectorizer),
                 ('reduce', Chi2Reducer(max_n_features=self.max_n_features)),
                 ('clf', self.classifier)])
 
-        # Precompute features
-        self.precompute_features()
-
 
     def __str__(self):
-        '''
-        return a string uniquely identify the combination of dataset, and feature set
-        '''
+        '''Return a string uniquely identify the combination of dataset, and 
+        feature set'''
         return self.repr
-
-    def precompute_features(self):
-        '''
-        Precompute and store feature matrices to cache
-
-        Compute the following feature matrices depending on the pipeline feature
-        arugment:
-        - Word grams (1 to 6 separate file each)
-        - Character grams (1 to 6)
-        - Embeddings (two matrices with `max` and `mean` pooled embeddings)
-
-        Returns:
-        -----------
-        Stores one file per feature matrix in `cache_dir`
-        '''
-        if not os.path.exists(self.cache_dir):
-            os.mkdir(self.cache_dir)
-        X = self.dataset.df['text']
-
-        # Select word or character n-gram settings
-        if 'ngrams' in self.feature_set:
-            analyzer = 'word' if 'word' in self.feature_set else 'char_wb'
-
-            # Precompute bag-of-words/chars features.
-            for ngram in range(self.ngram_range[0], self.ngram_range[1]+1):
-                # Construct filename for the cache file
-                fname = os.path.join(
-                        self.cache_dir,
-                        f'{self.dataset.name}_{analyzer}_{ngram}.npz'
-                )
-                # Only recompute if file doesn't exist or features should be
-                # recomputed
-                if not os.path.isfile(fname) or self.recompute_features:
-                    logging.info(f'Precomputing {self.feature_set} ({ngram})..')
-                    cv = CountVectorizer(tokenizer=self.dataset.tokenizer,
-                                         analyzer=analyzer,
-                                         ngram_range=(ngram, ngram),
-                                         min_df=2,
-                                         max_df=1.0)
-                    transX = cv.fit_transform(X)
-                    sparse.save_npz(fname, transX)
-                    voc_fname = os.path.join(
-                        self.cache_dir,
-                        f'{self.dataset.name}_{analyzer}_{ngram}_vocab.pkl'
-                    )
-                    pickle.dump(cv.vocabulary_, open(voc_fname, 'wb'))
-                else:
-                    logging.info(f'Using precomputed features for '
-                                 f'{self.feature_set} ({ngram})...')
-
-        elif self.feature_set == 'embeddings':
-            em_name = self.embedding_model[0]
-            em = None
-            # Precomput the embedded documents
-            for pooling in ['mean', 'max']:
-                # Construct cache filename
-                self.repr += f'_{em_name}_{pooling}'
-                fname = os.path.join(
-                        self.cache_dir,
-                        (f'{self.dataset.name}_{em_name}_{pooling}_'
-                         'embedded.p')
-                        )
-
-                if not os.path.isfile(fname) or self.recompute_features:
-                    if em is None:
-                        logging.info(f'Loading {em_name} embedding model...')
-                        if self.embedding_model[1].endswith('.model'):
-                            # Load gensim format
-                            em = FastText.load(self.embedding_model[1])
-                        else:
-                            # Load fasttext format
-                            em = FastText.load_fasttext_format(
-                                    self.embedding_model[1]
-                                    )
-                    logging.info(f'Precomputing {pooling}-pooled embeddings...')
-                    X_out = []
-                    for i, doc in enumerate(X):
-                        tokens = self.dataset.tokenizer(doc)
-                        vecs = []
-                        for t in tokens:
-                            try:
-                                vecs.append(em.wv[t])
-                            # no char ngram of the work can be found
-                            except KeyError:
-                                continue
-                        if pooling == 'mean':
-                            X_out.append(np.mean(vecs, axis=0))
-                        else:
-                            X_out.append(np.max(vecs, axis=0))
-
-                    X_out = np.array(X_out)
-                    pickle.dump(X_out, open(fname, 'wb'))
-                else:
-                    logging.info(f'Using precomputed features for '
-                                 f'{pooling}-pooled embeddings')
-        else:
-            raise ValueError(f'feature_set {self.feature_set} not '
-                             'supported. Has to be one of '
-                             '["embeddings", "char_ngrams", "word_ngrams"]')
 
 
 class Chi2Reducer(TransformerMixin, BaseEstimator):
