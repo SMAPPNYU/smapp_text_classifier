@@ -6,9 +6,9 @@ import joblib
 import numpy as np
 import gensim
 
+from gensim.models import FastText
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.base import TransformerMixin, BaseEstimator
-from gensim.models import FastText
 
 def _check_X(X):
     '''Check if document input has an index'''
@@ -29,7 +29,7 @@ class CachedVectorizer:
             and the feature matrix recomputed
         cache: str, path to the file to cache the vectorizer + feature matrix
     '''
-    def __init__(self, cache_dir=None, recompute=None):
+    def __init__(self, cache_dir='./', recompute=False):
         self.cache_dir = cache_dir
         self.recompute = recompute
         self.feature_matrix = None
@@ -41,6 +41,7 @@ class CachedVectorizer:
             raise CacheError()
         elif os.path.exists(cache):
             cached_self = joblib.load(cache)
+            del cached_self.recompute
             self.__dict__.update(cached_self.__dict__)
         else:
             raise CacheError()
@@ -52,6 +53,13 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
     documents it was fitted to to a cache file. When re-used, subsets of the
     initial document can be vectorized by pulling the corresponding rows from
     the full document-term matrix. This avoids re-tokenization and vectorization
+
+    There are multiple peculiar design choices (e.g. cache as a property) that
+    stem from the fact that this class is meant to be used in a sklearn pipeline
+    that is cross validated using the sklearn cross-validation tools. I.e.
+    during cross validation, the base estimator is cloned (that is, the
+    estimator with default paramter settings) and the parameters that are tuned
+    are set dynamically after initialization.
 
     Attributes:
         cache_dir: str, directory to cache the vectorizer to
@@ -65,10 +73,8 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
     def __init__(self, cache_dir='./', ds_name='test', ngram_range=None,
                  analyzer=None, recompute=False, **kwargs):
         super().__init__(ngram_range=ngram_range, analyzer=analyzer, **kwargs)
-        self.cache_dir = cache_dir
         self.ds_name = ds_name
-        self.recompute = recompute
-        super(CountVectorizer, self).__init__(cache_dir, self.recompute)
+        super(CountVectorizer, self).__init__(cache_dir, recompute)
 
     @property
     def cache(self):
@@ -106,6 +112,13 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
     initial document can be vectorized by pulling the corresponding rows from
     the full document-term matrix. This avoids re-tokenization and vectorization
 
+    There are multiple peculiar design choices (e.g. cache as a property) that
+    stem from the fact that this class is meant to be used in a sklearn pipeline
+    that is cross validated using the sklearn cross-validation tools. I.e.
+    during cross validation, the base estimator is cloned (that is, the
+    estimator with default paramter settings) and the parameters that are tuned
+    are set dynamically after initialization.
+
     Attributes:
         embedding_model: tuple(name, path), identifier and path to the embedding
             model. Currently only Fasttext embeddings in Gensim or Facebook
@@ -120,22 +133,18 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
     def __init__(self, embedding_model, cache_dir=None,
                  ds_name=None, pooling_method=None,
                  tokenize=None, recompute=False):
-        self.embedding_model_name = embedding_model[0]
-        self.embedding_model_path = embedding_model[1]
+        self.embedding_model = embedding_model
         self.pooling_method = pooling_method
-        self.cache_dir = cache_dir
         self.ds_name = ds_name
         self.dimensionality = None
-        self.recompute = recompute
-        super(BaseEstimator, self).__init__(self.cache_dir, self.recompute)
+        super(BaseEstimator, self).__init__(cache_dir, recompute)
         self.tokenize = tokenize
-        self.recompute = recompute
 
     @property
     def cache(self):
         return os.path.join(
-            self.cache_dir, 
-            (f'{self.ds_name}_{self.embedding_model_name}_'
+            self.cache_dir,
+            (f'{self.ds_name}_{self.embedding_model[0]}_'
              f'{self.pooling_method}.pkl')
         )
 
@@ -153,7 +162,7 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
             return self.feature_matrix[X.index, ]
         except CacheError:
             em = self._load_embedding_model()
-            self.feature_matrix = np.array([self._embed_doc(doc, em) 
+            self.feature_matrix = np.array([self._embed_doc(doc, em)
                                             for doc in X])
             joblib.dump(self, self.cache)
             return self.feature_matrix
@@ -162,14 +171,14 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         # Quick hack to allow passing of pre-loaded models
         # TODO: change naming of attribute and update documentation
         #       this might be a useful feature
-        if isinstance(self.embedding_model_path,
+        if isinstance(self.embedding_model[1],
                       gensim.models.fasttext.FastText):
-            em = self.embedding_model_path
+            em = self.embedding_model[1]
         else:
-            if self.embedding_model_path.endswith('.model'):
-                em = FastText.load(self.embedding_model_path)
+            if self.embedding_model[1].endswith('.model'):
+                em = FastText.load(self.embedding_model[1])
             else:
-                em = FastText.load_fasttext_format(self.embedding_model_path)
+                em = FastText.load_fasttext_format(self.embedding_model[1])
         self.dimensionality = em.wv[em.wv.index2word[0]].shape[0]
         return em
 
