@@ -8,12 +8,12 @@ import pickle
 import os
 import multiprocessing
 import logging
-import scipy as sp
-import numpy as np
 import warnings
 import itertools
+import numpy as np
 
 from gensim.models import FastText
+import scipy as sp
 from scipy import sparse
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
@@ -24,11 +24,11 @@ from sklearn.feature_selection import chi2
 from sklearn.base import TransformerMixin, BaseEstimator
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import StandardScaler
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-from smapp_text_classifier.vectorizers import (CachedCountVectorizer, 
+from smapp_text_classifier.vectorizers import (CachedCountVectorizer,
                                                CachedEmbeddingVectorizer)
 
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 
 class TextClassifier:
@@ -107,9 +107,8 @@ class TextClassifier:
         if self.algorithm == 'random_forest':
             self.classifier = RandomForestClassifier(max_features='auto')
             self.params.update(
-                    {'clf__n_estimators': sp.stats.randint(10, 500),
-                     'clf__min_samples_split': sp.stats.randint(2, 20)
-                    }
+                {'clf__n_estimators': sp.stats.randint(10, 500),
+                 'clf__min_samples_split': sp.stats.randint(2, 20)}
             )
         elif self.algorithm == 'elasticnet':
             self.classifier = SGDClassifier(loss='log', penalty='elasticnet',
@@ -143,7 +142,7 @@ class TextClassifier:
         print('precomputing')
         if feature_set == 'embeddings':
             vectorizer = CachedEmbeddingVectorizer(
-                cache_dir=self.cache_dir, 
+                cache_dir=self.cache_dir,
                 ds_name=dataset.name,
                 embedding_model=self.embedding_model,
                 tokenize=dataset.tokenizer,
@@ -159,17 +158,17 @@ class TextClassifier:
             )
 
         prefix = 'vectorize__'
-        vec_params = {k: v for k,v in self.params.items() 
+        vec_params = {k: v for k, v in self.params.items()
                       if k.startswith(prefix)}
 
         for value_combo in itertools.product(*vec_params.values()):
-            par = {key[len(prefix):]: value_combo[i] 
+            par = {key[len(prefix):]: value_combo[i]
                    for i, key in enumerate(vec_params)}
             vectorizer = vectorizer.set_params(**par)
             vectorizer = vectorizer.fit(self.dataset.df.text)
         vectorizer = vectorizer.set_params(recompute=self.recompute_features,
                                            **{key: None for key in par})
- 
+
         # Assemble Pipeline
         if feature_set == 'embeddings':
             self.pipeline = Pipeline([
@@ -183,7 +182,7 @@ class TextClassifier:
 
 
     def __str__(self):
-        '''Return a string uniquely identify the combination of dataset, and 
+        '''Return a string uniquely identify the combination of dataset, and
         feature set'''
         return self.repr
 
@@ -192,41 +191,42 @@ class Chi2Reducer(TransformerMixin, BaseEstimator):
     '''Estimator that reduces the number of features by
     selecting the top predictive features according to
     chi^2 statistic (see sklearn.feature_selection.chi2)
-    
+
     Attributes:
     ----------
     max_n_features: Maximum numbers of features to return.
     top_idxs: Vocabulary indices in order of chi2 importance.
-    self.p_values: P-values of chi2 test for each feature in the 
+    self.p_values: P-values of chi2 test for each feature in the
         order of the occurence in X (columns).
     '''
     def __init__(self, max_n_features):
         self.max_n_features = int(max_n_features)
         self.top_idxs = None
         self.p_values = None
-        
+
 
     def fit(self, X, y):
         '''Calculates chi2 statistics for all features in X'''
-        
+
         # Warnings are suppressed here because some features have zero occurence
         # due to the train test split (the feature matrix is generated for the
         # complete dataset, but the precompute vectorizer only returns rows for
-        # documents in the training/test set). These features are taken care of 
+        # documents in the training/test set). These features are taken care of
         # explicitly later
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             c2 = chi2(X, y)
-        
+
         # Set p-value of nan feature to 1 and chi2 statistic to 0
-        new_chi2 = [0 if np.isnan(x) else x for x in c2[0]]
         new_pval = [1.0 if np.isnan(x) else x for x in c2[1]]
-            
-        sorted_features = sorted([(pval, idx) for idx, pval in enumerate(new_pval)],
+
+        sorted_features = sorted([(pval, idx) for idx, pval
+                                  in enumerate(new_pval)],
                                  key=lambda x: x[0],
                                  reverse=False)
-        
-        self.p_values = [x[0] for x in sorted(sorted_features, key=lambda x: x[1])]
+
+        self.p_values = [x[0] for x in sorted(sorted_features,
+                                              key=lambda x: x[1])]
         top_features = sorted_features[:self.max_n_features]
         self.top_idxs = list(map(lambda x: x[1], top_features))
         return self
@@ -281,64 +281,3 @@ class DictionaryModel:
             vader_sentiments = pool.map(self.score_document, X)
 
         return vader_sentiments
-
-class PrecomputeVectorizer(CountVectorizer):
-    '''
-    load precomputed document-term matrix or embedding
-    in pipeline instead of calling CountVectorizer in
-    each process
-    '''
-
-    def __init__(self, dataset, feature_set, cache_dir=None, ngram_range=None,
-                 pooling_method=None, embedding_model_name=None):
-        self.dataset = dataset
-        if feature_set == 'char_ngrams':
-            self.analyzer = 'char_wb'
-        elif feature_set == 'word_ngrams':
-            self.analyzer = 'word'
-        self.feature_set = feature_set
-        self.ngram_range = ngram_range
-        self.pooling_method = pooling_method
-        self.cache_dir = cache_dir
-        self.embedding_model_name = embedding_model_name
-
-    def fit(self):
-        return self
-
-    def transform(self, rawdocuments, y=None):
-        self.vocabulary = []
-        if self.feature_set in ['char_ngrams', 'word_ngrams']:
-            for pos, i in enumerate(range(self.ngram_range[0], self.ngram_range[1]+1)):
-                # Load the ith matrix and concatenate it to previous
-                mat_path = os.path.join(
-                    self.cache_dir, 
-                    f'{self.dataset.name}_{self.analyzer}_{i}.npz'
-                )
-                if pos == 0:
-                    X = sparse.load_npz(mat_path)
-                    X = X[rawdocuments.index, ]
-                else:
-                    X1 = sparse.load_npz(mat_path)
-                    X1 = X1[rawdocuments.index, ]
-                    X = sparse.hstack([X, X1])
-                # Load the vocabulary corresponding to the ith matrix     
-                vocab_path = os.path.join(
-                    self.cache_dir,
-                    f'{self.dataset.name}_{self.analyzer}_{i}_vocab.pkl'
-                )
-                vocab_dict = pickle.load(open(vocab_path, 'rb'))
-                vocab = [x[0] for x in sorted(vocab_dict.items(), key=lambda x: x[1])] 
-                self.vocabulary.extend(vocab)
-                    
-        elif self.feature_set == 'embeddings':
-            mat_path = os.path.join(
-                    self.cache_dir,
-                    (f'{self.dataset.name}_{self.embedding_model_name}_'
-                     f'{self.pooling_method}_embedded.p'))
-            X = pickle.load(open(mat_path, 'rb'))
-            X = X[rawdocuments.index, ]
-
-        return X
-
-    def fit_transform(self, rawdocuments, y=None):
-        return self.transform(rawdocuments, y)
