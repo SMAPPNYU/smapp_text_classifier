@@ -4,7 +4,6 @@ Abstraction of machine learning model
 Authors: Michael Fengyuan Liu, Fridolin Linder
 '''
 
-import pickle
 import os
 import multiprocessing
 import logging
@@ -12,9 +11,7 @@ import warnings
 import itertools
 import numpy as np
 
-from gensim.models import FastText
 import scipy as sp
-from scipy import sparse
 from sklearn.svm import SVC
 from sklearn.naive_bayes import GaussianNB
 from sklearn.linear_model import SGDClassifier
@@ -22,8 +19,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.feature_selection import chi2
 from sklearn.base import TransformerMixin, BaseEstimator
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.preprocessing import StandardScaler
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 from smapp_text_classifier.vectorizers import (CachedCountVectorizer,
@@ -140,7 +135,6 @@ class TextClassifier:
         # cross-validation)
 
         # Initialize the vectorizer depending on the requested feature type
-        print('precomputing')
         if feature_set == 'embeddings':
             vectorizer = CachedEmbeddingVectorizer(
                 cache_dir=self.cache_dir,
@@ -167,9 +161,12 @@ class TextClassifier:
             par = {key[len(prefix):]: value_combo[i]
                    for i, key in enumerate(vec_params)}
             vectorizer = vectorizer.set_params(**par)
-            vectorizer = vectorizer.fit(self.dataset.df.text)
-        vectorizer = vectorizer.set_params(recompute=self.recompute_features,
-                                           **{key: None for key in par})
+            if not os.path.exists(vectorizer.cache) or self.recompute_features:
+                logging.debug(f'Pre-computing {vectorizer.cache}')
+                vectorizer = vectorizer.fit(self.dataset.df.text)
+        vectorizer = vectorizer.set_params(
+            recompute=self.recompute_features, **{key: None for key in par}
+        )
 
         # Assemble Pipeline
         if feature_set == 'embeddings':
