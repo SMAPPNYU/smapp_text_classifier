@@ -11,13 +11,11 @@ from sklearn.model_selection import train_test_split
 
 class DataSet:
     '''Data Set for the Sentiment Analysis Experiment + Pipeline
-
-    tokenizer: must contain a `tokenize(string)` method
     '''
 
     def __init__(self, name, field_mapping,
                  file_subset=None, test_size=0.25,
-                 tokenizer=None, na_rm=True, train_input=None,
+                 na_rm=True, train_input=None,
                  test_input=None, input_=None):
 
         # Store inputs
@@ -25,7 +23,6 @@ class DataSet:
         self.field_mapping = field_mapping
         self.test_size = test_size
         self.file_subset = file_subset
-        self.tokenizer = tokenizer
         self.input_ = input_
         self.train_input, self.test_input = train_input, test_input
 
@@ -67,17 +64,6 @@ class DataSet:
     @property
     def df_test(self):
         return self.df.iloc[self.test_idxs]
-
-    def n_tokens(self):
-        '''
-        Output the lower bound of number of features
-        When randomize searching for the optimal parameter, max_df >= 0.8,
-        min_df <= 5
-        '''
-        vectorizer = CountVectorizer(ngram_range=(1, 1), max_df=1, min_df=1,
-                                     tokenizer=self.tokenizer)
-        grams = vectorizer.fit_transform(self.df['text'])
-        return len(vectorizer.get_feature_names())
 
     def get_texts(self, set_):
         if set_ == "train":

@@ -68,7 +68,7 @@ class TextClassifier:
     def __init__(self, dataset, algorithm, feature_set,
                  max_n_features=20000, embedding_model=None,
                  cache_dir='feature_cache/', recompute_features=False,
-                 ngram_range=None):
+                 ngram_range=None, tokenize=None):
         self.algorithm = algorithm
         self.dataset = dataset
         self.max_n_features = max_n_features
@@ -77,6 +77,7 @@ class TextClassifier:
         self.feature_set = feature_set
         self.recompute_features = recompute_features
         self.ngram_range = ngram_range
+        self.tokenize = tokenize
         self.repr = f'{self.dataset.name}_{self.feature_set}_{self.algorithm}'
 
         # If ngram range is not specified, set it to reasonable defaults
@@ -145,7 +146,7 @@ class TextClassifier:
                 cache_dir=self.cache_dir,
                 ds_name=dataset.name,
                 embedding_model=self.embedding_model,
-                tokenize=dataset.tokenizer,
+                tokenizer=self.tokenize,
                 recompute=self.recompute_features,
             )
         else:
@@ -155,6 +156,7 @@ class TextClassifier:
                 ds_name=dataset.name,
                 analyzer=analyzer,
                 recompute=self.recompute_features,
+                tokenizer=self.tokenize
             )
 
         prefix = 'vectorize__'

@@ -128,17 +128,18 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         pooling_method: str, one of [`mean`, `max`]. Method to combine word
             vectors to a document vector.
         recompute: bool, ignore the cache if True
+        tokenizer: function that tokenizes a string to a list of tokens
     '''
 
     def __init__(self, embedding_model, cache_dir=None,
                  ds_name=None, pooling_method=None,
-                 tokenize=None, recompute=False):
+                 tokenizer=None, recompute=False):
         self.embedding_model = embedding_model
         self.pooling_method = pooling_method
         self.ds_name = ds_name
         self.dimensionality = None
         super(BaseEstimator, self).__init__(cache_dir, recompute)
-        self.tokenize = tokenize
+        self.tokenize = tokenizer
 
     @property
     def cache(self):
