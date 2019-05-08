@@ -2,13 +2,15 @@
 Author: Fridolin Linder
 '''
 import os
-import joblib
+import logging
 import numpy as np
 import gensim
+import joblib
 
 from gensim.models import FastText
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.base import TransformerMixin, BaseEstimator
+from smapp_text_classifier.utilities import timeit
 
 def _check_X(X):
     '''Check if document input has an index'''
@@ -76,6 +78,7 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
         self.ds_name = ds_name
         super(CountVectorizer, self).__init__(cache_dir, recompute)
 
+
     @property
     def cache(self):
         return os.path.join(
@@ -83,20 +86,26 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
             f'{self.ds_name}_{self.analyzer}_{self.ngram_range}.joblib'
         )
 
+    @timeit
     def transform(self, raw_documents):
         try:
             self._load_from_cache(self.cache)
             _check_X(raw_documents)
+            logging.debug('Transforming from cache')
             return self.feature_matrix[raw_documents.index, ]
         except CacheError:
+            logging.debug('Transforming from scratch')
             return super().transform(raw_documents)
 
+    @timeit
     def fit_transform(self, raw_documents, y=None):
         try:
             self._load_from_cache(self.cache)
             _check_X(raw_documents)
+            logging.debug('Transforming from cache')
             return self.feature_matrix[raw_documents.index, ]
         except CacheError:
+            logging.debug('Transforming from scratch')
             self.feature_matrix = super().fit_transform(raw_documents)
             joblib.dump(self, self.cache)
             return self.feature_matrix
@@ -130,7 +139,6 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         recompute: bool, ignore the cache if True
         tokenizer: function that tokenizes a string to a list of tokens
     '''
-
     def __init__(self, embedding_model, cache_dir=None,
                  ds_name=None, pooling_method=None,
                  tokenizer=None, recompute=False):
@@ -156,22 +164,26 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
     def fit_transform(self, X, y=None):
         return self.transform(X)
 
+    @timeit
     def transform(self, X, y=None):
         try:
             self._load_from_cache(self.cache)
             _check_X(X)
+            logging.debug('Transforming from cache')
             return self.feature_matrix[X.index, ]
         except CacheError:
+            logging.debug('Transforming from cache')
             em = self._load_embedding_model()
             self.feature_matrix = np.array([self._embed_doc(doc, em)
                                             for doc in X])
             joblib.dump(self, self.cache)
             return self.feature_matrix
-
+    @timeit
     def _load_embedding_model(self):
         # Quick hack to allow passing of pre-loaded models
         # TODO: change naming of attribute and update documentation
         #       this might be a useful feature
+        logging.debug('Loading embedding model')
         if isinstance(self.embedding_model[1],
                       gensim.models.fasttext.FastText):
             em = self.embedding_model[1]
