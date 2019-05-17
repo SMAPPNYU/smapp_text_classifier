@@ -72,8 +72,8 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
         **kwargs: additional arguments passed to CountVectorizer, see parent
             documentation
     '''
-    def __init__(self, cache_dir='./', ds_name='test', ngram_range=None,
-                 analyzer=None, recompute=False, **kwargs):
+    def __init__(self, cache_dir='./', ds_name='test', ngram_range=(1, 1),
+                 analyzer='word', recompute=False, **kwargs):
         super().__init__(ngram_range=ngram_range, analyzer=analyzer, **kwargs)
         self.ds_name = ds_name
         super(CountVectorizer, self).__init__(cache_dir, recompute)

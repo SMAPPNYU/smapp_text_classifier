@@ -32,7 +32,8 @@ class TextClassifier:
     Attributes:
     ----------
     dataset: object of class DataSet
-    algorithm: str, one of ['random_forest', 'svm', 'elasticnet', 'naive_bayes']
+    algorithm: str, one of ['random_forest', 'svm', 'elasticnet', 'naive_bayes',
+                            'linear_svm']
     feature_set: str, one of ['embeddings', 'char_ngrams', 'word_ngrams']
     max_n_features: int, maximum number of features to retain from Chi2Reducer.
         Not relevant for embeddings since embedding dimensionality is usually
@@ -107,8 +108,11 @@ class TextClassifier:
                  'clf__min_samples_split': sp.stats.randint(2, 20)}
             )
         elif self.algorithm == 'elasticnet':
-            self.classifier = SGDClassifier(loss='log', penalty='elasticnet',
-                                            max_iter=1000, tol=1e-3)
+            self.classifier = SGDClassifier(loss='log', penalty='elasticnet')
+            self.params.update({'clf__alpha': sp.stats.uniform(0.00001, 0.01),
+                                'clf__l1_ratio': sp.stats.uniform(0, 1)})
+        elif self.algorithm == 'linear_svm':
+            self.classifier = SGDClassifier(loss='hinge', penalty='elasticnet')
             self.params.update({'clf__alpha': sp.stats.uniform(0.00001, 0.01),
                                 'clf__l1_ratio': sp.stats.uniform(0, 1)})
         elif self.algorithm == 'naive_bayes':
@@ -123,7 +127,7 @@ class TextClassifier:
                                 'clf__tol': sp.stats.uniform(1e-1, 1e-5)})
         else:
             raise ValueError("`algorithm` must be one of ['naive_bayes', 'elast"
-                             "icnet', 'random_forest', 'svm']")
+                             "icnet', 'random_forest', 'svm', 'linear_svm']")
 
 
         # Precompute features
@@ -156,7 +160,8 @@ class TextClassifier:
         prefix = 'vectorize__'
         vec_params = {k: v for k, v in self.params.items()
                       if k.startswith(prefix)}
-
+        
+        init_params = vectorizer.get_params()
         for value_combo in itertools.product(*vec_params.values()):
             par = {key[len(prefix):]: value_combo[i]
                    for i, key in enumerate(vec_params)}
@@ -164,9 +169,9 @@ class TextClassifier:
             if not os.path.exists(vectorizer.cache) or self.recompute_features:
                 logging.debug(f'Pre-computing {vectorizer.cache}')
                 vectorizer = vectorizer.fit(self.dataset.df.text)
-        vectorizer = vectorizer.set_params(
-            recompute=self.recompute_features, **{key: None for key in par}
-        )
+        vectorizer = vectorizer.set_params(**init_params)
+            #recompute=self.recompute_features, **{key: None for key in par}
+        #)
 
         # Assemble Pipeline
         if feature_set == 'embeddings':
