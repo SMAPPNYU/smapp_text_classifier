@@ -35,18 +35,27 @@ class CachedVectorizer:
         self.cache_dir = cache_dir
         self.recompute = recompute
         self.feature_matrix = None
+        self.index_mapping = None
         if not os.path.exists(self.cache_dir):
             os.mkdir(self.cache_dir)
 
+    @timeit
     def _load_from_cache(self, cache):
         if self.recompute:
+            logging.debug('Not loading due to recompute request')
             raise CacheError()
         elif os.path.exists(cache):
             cached_self = joblib.load(cache)
             del cached_self.recompute
             self.__dict__.update(cached_self.__dict__)
         else:
+            logging.debug('Cache not found')
             raise CacheError()
+
+    def get_docs(self, raw_idxs):
+        mapped = [self.index_mapping[idx] for idx in raw_idxs]
+        return self.feature_matrix[mapped, ]
+
 
 class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
     '''Modification of the sklearn CountVectorizer to allow caching
@@ -89,10 +98,10 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
     @timeit
     def transform(self, raw_documents):
         try:
+            logging.debug('Transforming from cache')
             self._load_from_cache(self.cache)
             _check_X(raw_documents)
-            logging.debug('Transforming from cache')
-            return self.feature_matrix[raw_documents.index, ]
+            return self.get_docs(raw_documents.index)
         except CacheError:
             logging.debug('Transforming from scratch')
             return super().transform(raw_documents)
@@ -100,15 +109,22 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
     @timeit
     def fit_transform(self, raw_documents, y=None):
         try:
+            logging.debug('Transforming from cache')
             self._load_from_cache(self.cache)
             _check_X(raw_documents)
-            logging.debug('Transforming from cache')
-            return self.feature_matrix[raw_documents.index, ]
+            return self.get_docs(raw_documents.index)
+
         except CacheError:
             logging.debug('Transforming from scratch')
             self.feature_matrix = super().fit_transform(raw_documents)
+            # keep track of what index location of input maps to which row in
+            # the feature matrix
+            self.index_mapping = {
+                    idx: i for i, idx in enumerate(raw_documents.index)
+            }
             joblib.dump(self, self.cache)
             return self.feature_matrix
+
 
 
 class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
@@ -167,17 +183,23 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
     @timeit
     def transform(self, X, y=None):
         try:
+            logging.debug('Transforming from cache')
             self._load_from_cache(self.cache)
             _check_X(X)
-            logging.debug('Transforming from cache')
-            return self.feature_matrix[X.index, ]
+            return self.get_docs(X.index)
         except CacheError:
             logging.debug('Transforming from cache')
             em = self._load_embedding_model()
             self.feature_matrix = np.array([self._embed_doc(doc, em)
                                             for doc in X])
+            # keep track of what index location of input maps to which row in
+            # the feature matrix
+            self.index_mapping = {
+                    idx: i for i, idx in enumerate(X.index)
+            }
             joblib.dump(self, self.cache)
             return self.feature_matrix
+
     @timeit
     def _load_embedding_model(self):
         # Quick hack to allow passing of pre-loaded models
