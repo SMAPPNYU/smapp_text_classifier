@@ -53,7 +53,17 @@ class CachedVectorizer:
             raise CacheError()
 
     def get_docs(self, raw_idxs):
-        mapped = [self.index_mapping[idx] for idx in raw_idxs]
+        # TODO: This function should check if documents matched by index
+        # actually match the documents in the cache (if not this would be a
+        # problem if the user passes new data with index values that match the
+        # index of the cached data, which is to be expected). In this case
+        # re-vectorizing a single document should be sufficient to figure out if
+        # the cache doesn't match and fall back to transform from scratch
+        try:
+            mapped = [self.index_mapping[idx] for idx in raw_idxs]
+        except KeyError:
+            logging.debug('Index of passed data does not match cached data')
+            raise CacheError()
         return self.feature_matrix[mapped, ]
 
 
