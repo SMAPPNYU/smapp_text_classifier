@@ -154,7 +154,8 @@ class TextClassifier:
                 ds_name=dataset.name,
                 analyzer=analyzer,
                 recompute=self.recompute_features,
-                tokenizer=self.tokenize
+                tokenizer=self.tokenize,
+                max_features=self.max_n_features
             )
 
         prefix = 'vectorize__'
@@ -181,9 +182,8 @@ class TextClassifier:
         else:
             self.pipeline = Pipeline([
                 ('vectorize', vectorizer),
-                ('reduce', Chi2Reducer(max_n_features=self.max_n_features)),
+                #('reduce', Chi2Reducer(max_n_features=self.max_n_features)),
                 ('clf', self.classifier)])
-
 
     def __str__(self):
         '''Return a string uniquely identify the combination of dataset, and
