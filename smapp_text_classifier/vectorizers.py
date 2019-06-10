@@ -70,7 +70,6 @@ class CachedVectorizer:
             raise CacheError()
         return self.feature_matrix[mapped, ]
 
-
     def _check_X(self, X):
         '''Check if document input has an index and if raw_docs match
         the cached data'''
@@ -81,9 +80,7 @@ class CachedVectorizer:
         if not all(X.index.isin(self.doc_md5.index)):
             logging.debug('Not all indices of new documents are in cache index.')
             raise CacheError()
-        # If the vectorizer has been fitted (i.e. has a cached feature matrix)
-        # check sample of 5 documents to make sure the docs match the ones in the
-        # cached data. If not raise a CacheError and print appropriate warning
+        # Check if docs at index match docs in cache at index (5 sample docs)
         if self.feature_matrix is not None:
             logging.debug('Checking if cache matches index docs')
             sample_idxs = np.random.choice(X.index, size=5, replace=False)
@@ -93,18 +90,6 @@ class CachedVectorizer:
                     logging.warning('Indices overlapping but mismatch of '
                                     'documents and cache.')
                     raise CacheError()
-                #sample_trans = self.transform_from_scratch([X.loc[idx]])
-                #nz_sample = sample_trans.nonzero()[1]
-                #sample_cache = self.get_docs([idx]).nonzero()[1]
-                #if set(nz_sample) != set(sample_cache):
-                #    logging.warning(
-                #        'Mismatch of documents and cache. Falling back to'
-                #        ' transforming from scratch'
-                #    )
-                #    raise CacheError()
-
-    def transform_from_scratch(self, X):
-        raise NotImplementedError('This method must be overwritten')
 
 
 class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
@@ -136,7 +121,6 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
         super().__init__(ngram_range=ngram_range, analyzer=analyzer, **kwargs)
         self.ds_name = ds_name
         super(CountVectorizer, self).__init__(cache_dir, recompute)
-
 
     @property
     def cache(self):
@@ -180,7 +164,6 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
 
     def transform_from_scratch(self, X):
         return super().transform(X)
-
 
 
 class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
