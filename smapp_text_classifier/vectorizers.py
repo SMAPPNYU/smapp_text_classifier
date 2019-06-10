@@ -3,25 +3,37 @@ Author: Fridolin Linder
 '''
 import os
 import logging
+import warnings
 import numpy as np
+import pandas as pd
 import gensim
 import joblib
+import hashlib
 
 from gensim.models import FastText
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.base import TransformerMixin, BaseEstimator
 from smapp_text_classifier.utilities import timeit
 
-def _check_X(X):
-    '''Check if document input has an index'''
-    if not hasattr(X, 'index'):
-        raise ValueError('X needs index if vectorized from cache')
-
 class CacheError(ValueError):
     '''Basic exception for errors related to the vectorizer cache'''
     def __init__(self, msg=None):
         msg = "Cache not found" if msg is None else msg
         super().__init__(msg)
+
+def hash_document(document):
+    encoded = document.encode('utf-8')
+    return hashlib.md5(encoded).hexdigest()
+
+@timeit
+def hash_corpus(documents):
+    '''store a index-md5 hash mapping for each document to be able to 
+    check the docs later'''
+    out = pd.DataFrame(
+        {'md5': [hash_document(s) for s in documents]}
+    )
+    out.index = documents.index
+    return out
 
 class CachedVectorizer:
     '''Base class to build cached vectorizer.
@@ -36,6 +48,7 @@ class CachedVectorizer:
         self.recompute = recompute
         self.feature_matrix = None
         self.index_mapping = None
+        self.doc_md5 = None
         if not os.path.exists(self.cache_dir):
             os.mkdir(self.cache_dir)
 
@@ -53,18 +66,48 @@ class CachedVectorizer:
             raise CacheError()
 
     def get_docs(self, raw_idxs):
-        # TODO: This function should check if documents matched by index
-        # actually match the documents in the cache (if not this would be a
-        # problem if the user passes new data with index values that match the
-        # index of the cached data, which is to be expected). In this case
-        # re-vectorizing a single document should be sufficient to figure out if
-        # the cache doesn't match and fall back to transform from scratch
         try:
             mapped = [self.index_mapping[idx] for idx in raw_idxs]
         except KeyError:
             logging.debug('Index of passed data does not match cached data')
             raise CacheError()
         return self.feature_matrix[mapped, ]
+    
+   
+    def _check_X(self, X):
+        '''Check if document input has an index and if raw_docs match 
+        the cached data'''
+        # Check the input documents have an index
+        if not hasattr(X, 'index'):
+            raise ValueError('X needs index if vectorized from cache')
+        # Check if all requested index elements are in the cache index
+        if not all(X.index.isin(self.doc_md5.index)):
+            logging.debug('Not all indices of new documents are in cache index.')
+            raise CacheError()
+        # If the vectorizer has been fitted (i.e. has a cached feature matrix) 
+        # check sample of 5 documents to make sure the docs match the ones in the
+        # cached data. If not raise a CacheError and print appropriate warning
+        if self.feature_matrix is not None:
+            logging.debug('Checking if cache matches index docs')
+            sample_idxs = np.random.choice(X.index, size=5, replace=False)
+            for idx in sample_idxs:
+                d_hash = hash_document(X.loc[idx])
+                if self.doc_md5['md5'].loc[idx] != d_hash:
+                    logging.warning('Indices overlapping but mismatch of '
+                                    'documents and cache.')
+                    raise CacheError()
+                #sample_trans = self.transform_from_scratch([X.loc[idx]])
+                #nz_sample = sample_trans.nonzero()[1]
+                #sample_cache = self.get_docs([idx]).nonzero()[1]
+                #if set(nz_sample) != set(sample_cache):
+                #    logging.warning(
+                #        'Mismatch of documents and cache. Falling back to'
+                #        ' transforming from scratch'
+                #    )
+                #    raise CacheError()
+
+    def transform_from_scratch(self, X):
+        raise NotImplementedError('This method must be overwritten')
 
 
 class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
@@ -110,30 +153,36 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
         try:
             logging.debug('Transforming from cache')
             self._load_from_cache(self.cache)
-            _check_X(raw_documents)
+            self._check_X(raw_documents)
             return self.get_docs(raw_documents.index)
         except CacheError:
             logging.debug('Transforming from scratch')
-            return super().transform(raw_documents)
+            self.transform_from_scratch(raw_documents)
 
     @timeit
     def fit_transform(self, raw_documents, y=None):
         try:
             logging.debug('Transforming from cache')
             self._load_from_cache(self.cache)
-            _check_X(raw_documents)
+            self._check_X(raw_documents)
             return self.get_docs(raw_documents.index)
 
         except CacheError:
             logging.debug('Transforming from scratch')
             self.feature_matrix = super().fit_transform(raw_documents)
+            self.doc_md5 = hash_corpus(raw_documents)
             # keep track of what index location of input maps to which row in
             # the feature matrix
             self.index_mapping = {
                     idx: i for i, idx in enumerate(raw_documents.index)
             }
+            ## Store md5 sum of each doc to easily check later
+            #self.doc_md5 = hash_corpus(raw_documents)
             joblib.dump(self, self.cache)
             return self.feature_matrix
+    
+    def transform_from_scratch(self, X):
+        return super().transform(X)
 
 
 
@@ -195,11 +244,12 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         try:
             logging.debug('Transforming from cache')
             self._load_from_cache(self.cache)
-            _check_X(X)
+            self._check_X(X)
             return self.get_docs(X.index)
         except CacheError:
-            logging.debug('Transforming from cache')
+            logging.debug('Transforming from scratch')
             em = self._load_embedding_model()
+            logging.debug('Embedding documents')
             self.feature_matrix = np.array([self._embed_doc(doc, em)
                                             for doc in X])
             # keep track of what index location of input maps to which row in
@@ -207,8 +257,13 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
             self.index_mapping = {
                     idx: i for i, idx in enumerate(X.index)
             }
+            ## Store md5 sum of each doc to easily check later
+            self.doc_md5 = hash_corpus(X)
             joblib.dump(self, self.cache)
             return self.feature_matrix
+
+    def transform_from_scratch(self, X):
+        return self.transform(X)
 
     @timeit
     def _load_embedding_model(self):
