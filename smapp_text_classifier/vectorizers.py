@@ -3,14 +3,12 @@ Author: Fridolin Linder
 '''
 import os
 import logging
-import warnings
+import hashlib
 import numpy as np
 import pandas as pd
-import gensim
+import gensim.downloader as gensim_api
 import joblib
-import hashlib
 
-from gensim.models import FastText
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.base import TransformerMixin, BaseEstimator
 from smapp_text_classifier.utilities import timeit
@@ -25,9 +23,8 @@ def hash_document(document):
     encoded = document.encode('utf-8')
     return hashlib.md5(encoded).hexdigest()
 
-@timeit
 def hash_corpus(documents):
-    '''store a index-md5 hash mapping for each document to be able to 
+    '''store a index-md5 hash mapping for each document to be able to
     check the docs later'''
     out = pd.DataFrame(
         {'md5': [hash_document(s) for s in documents]}
@@ -72,10 +69,10 @@ class CachedVectorizer:
             logging.debug('Index of passed data does not match cached data')
             raise CacheError()
         return self.feature_matrix[mapped, ]
-    
-   
+
+
     def _check_X(self, X):
-        '''Check if document input has an index and if raw_docs match 
+        '''Check if document input has an index and if raw_docs match
         the cached data'''
         # Check the input documents have an index
         if not hasattr(X, 'index'):
@@ -84,7 +81,7 @@ class CachedVectorizer:
         if not all(X.index.isin(self.doc_md5.index)):
             logging.debug('Not all indices of new documents are in cache index.')
             raise CacheError()
-        # If the vectorizer has been fitted (i.e. has a cached feature matrix) 
+        # If the vectorizer has been fitted (i.e. has a cached feature matrix)
         # check sample of 5 documents to make sure the docs match the ones in the
         # cached data. If not raise a CacheError and print appropriate warning
         if self.feature_matrix is not None:
@@ -174,13 +171,13 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
             # keep track of what index location of input maps to which row in
             # the feature matrix
             self.index_mapping = {
-                    idx: i for i, idx in enumerate(raw_documents.index)
+                idx: i for i, idx in enumerate(raw_documents.index)
             }
             ## Store md5 sum of each doc to easily check later
             #self.doc_md5 = hash_corpus(raw_documents)
             joblib.dump(self, self.cache)
             return self.feature_matrix
-    
+
     def transform_from_scratch(self, X):
         return super().transform(X)
 
@@ -204,9 +201,10 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
     are set dynamically after initialization.
 
     Attributes:
-        embedding_model: tuple(name, path), identifier and path to the embedding
-            model. Currently only Fasttext embeddings in Gensim or Facebook
-            binary Fasttext format are supported.
+        embedding_model_name: str, name of a a pre-trained gensim embedding model.
+            (see here for https://github.com/RaRe-Technologies/gensim-data
+            available models). Self-trained models are currently not available
+            but will be coming soon.
         cache_dir: str, directory to cache the vectorizer to.
         ds_name: str, name of the dataset the vectorizer is fitted to.
         pooling_method: str, one of [`mean`, `max`]. Method to combine word
@@ -214,10 +212,10 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         recompute: bool, ignore the cache if True
         tokenizer: function that tokenizes a string to a list of tokens
     '''
-    def __init__(self, embedding_model, cache_dir=None,
+    def __init__(self, embedding_model_name, cache_dir=None,
                  ds_name=None, pooling_method=None,
                  tokenizer=None, recompute=False):
-        self.embedding_model = embedding_model
+        self.embedding_model_name = embedding_model_name
         self.pooling_method = pooling_method
         self.ds_name = ds_name
         self.dimensionality = None
@@ -228,7 +226,7 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
     def cache(self):
         return os.path.join(
             self.cache_dir,
-            (f'{self.ds_name}_{self.embedding_model[0]}_'
+            (f'{self.ds_name}_{self.embedding_model_name}_'
              f'{self.pooling_method}.pkl')
         )
 
@@ -255,7 +253,7 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
             # keep track of what index location of input maps to which row in
             # the feature matrix
             self.index_mapping = {
-                    idx: i for i, idx in enumerate(X.index)
+                idx: i for i, idx in enumerate(X.index)
             }
             ## Store md5 sum of each doc to easily check later
             self.doc_md5 = hash_corpus(X)
@@ -267,19 +265,9 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
 
     @timeit
     def _load_embedding_model(self):
-        # Quick hack to allow passing of pre-loaded models
-        # TODO: change naming of attribute and update documentation
-        #       this might be a useful feature
         logging.debug('Loading embedding model')
-        if isinstance(self.embedding_model[1],
-                      gensim.models.fasttext.FastText):
-            em = self.embedding_model[1]
-        else:
-            if self.embedding_model[1].endswith('.model'):
-                em = FastText.load(self.embedding_model[1])
-            else:
-                em = FastText.load_fasttext_format(self.embedding_model[1])
-        self.dimensionality = em.wv[em.wv.index2word[0]].shape[0]
+        em = gensim_api.load(self.embedding_model_name)
+        self.dimensionality = em.vector_size
         return em
 
     def _get_vector(self, word, model):
@@ -297,7 +285,7 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         token in the document
         '''
         tokens = self.tokenize(doc)
-        if len(tokens) == 0:
+        if not tokens:
             return np.zeros(self.dimensionality)
         vectors = np.array([self._get_vector(t, model.wv) for t in tokens])
         if self.pooling_method == 'mean':
