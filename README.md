@@ -25,7 +25,7 @@ dataset = DataSet(name='my_dataset', input_='my_dataset.csv',
                                  'text': 'my_textcolumn'})
 clf = TextClassifier(dataset=dataset, algorithm='svm', 
                      feature_set='embeddings',
-                     embedding_model=('my_model', 'path/to/my/model'))
+                     embedding_model_name='gensim-model-name')
 
 CV = RandomizedSearchCV(clf.pipeline, param_distributions=clf.params,
                         n_iter=5, cv=3, n_jobs=8, scoring='accuracy', 
