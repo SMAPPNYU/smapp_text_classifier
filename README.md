@@ -10,7 +10,7 @@ pip install git+https://github.com/smappnyu/smapp_text_classifier.git
 
 ## Example Use
 
-This is a bare bones example. For a more extensive executable notebook see `/pipeline_demo`.
+This is a bare bones example. For a more extensive executable notebook see [`/pipeline_demo`](https://github.com/SMAPPNYU/smapp_text_classifier/blob/master/pipeline_demo/pipeline_demo.ipynb).
 
 ```python
 from smapp_text_classifier.data import DataSet
