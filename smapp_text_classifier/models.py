@@ -38,13 +38,10 @@ class TextClassifier:
     max_n_features: int, maximum number of features to retain from Chi2Reducer.
         Not relevant for embeddings since embedding dimensionality is usually
         much smaller than common bag-of-words feature set sizes.
-    embedding_model: tuple(str, str), name and path to
-        the fasttext embedding model (other embedding models are currently not
-        supported). Only required if `feature_set='embeddings'`. The embedding
-        model file needs to have one of two file extensions: `.bin` for fasttext
-        format or `.model` for gensim format. If the model is in gensim format,
-        all additionally required auxiliary files have to be in the same
-        directory. See the gensim documentation for more information.
+    embedding_model_name: str, name of a a pre-trained gensim embedding model.
+        (see here for https://github.com/RaRe-Technologies/gensim-data
+        available models). Self-trained models are currently not available
+        but will be coming soon.
     cache_dir: str, directory to cache precomputed features
     recompute_features: bool, should feature matrices be re-computed even if
         they already exist in `cache_dir`? Note that, for character and word
@@ -62,14 +59,14 @@ class TextClassifier:
         `cache_dir`
     '''
     def __init__(self, dataset, algorithm, feature_set,
-                 max_n_features=20000, embedding_model=None,
+                 max_n_features=20000, embedding_model_name=None,
                  cache_dir='feature_cache/', recompute_features=False,
                  ngram_range=None, tokenize=None):
         self.algorithm = algorithm
         self.dataset = dataset
         self.max_n_features = max_n_features
         self.cache_dir = cache_dir
-        self.embedding_model = embedding_model
+        self.embedding_model_name = embedding_model_name
         self.feature_set = feature_set
         self.recompute_features = recompute_features
         self.ngram_range = ngram_range
@@ -143,7 +140,7 @@ class TextClassifier:
             vectorizer = CachedEmbeddingVectorizer(
                 cache_dir=self.cache_dir,
                 ds_name=dataset.name,
-                embedding_model=self.embedding_model,
+                embedding_model_name=self.embedding_model_name,
                 tokenizer=self.tokenize,
                 recompute=self.recompute_features,
             )
