@@ -138,7 +138,7 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
             return self.get_docs(raw_documents.index)
         except CacheError:
             logging.debug('Transforming from scratch')
-            self.transform_from_scratch(raw_documents)
+            return self.transform_from_scratch(raw_documents)
 
     @timeit
     def fit_transform(self, raw_documents, y=None):
