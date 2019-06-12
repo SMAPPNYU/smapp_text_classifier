@@ -49,6 +49,13 @@ class CachedVectorizer:
         if not os.path.exists(self.cache_dir):
             os.mkdir(self.cache_dir)
 
+    def transform_from_cache(self, raw_documents):
+        logging.debug('Transforming from cache')
+        # TODO: this load might be unnecessary in some cases, build in a check
+        self._load_from_cache(self.cache)
+        self._check_X(raw_documents)
+        return self.get_docs(raw_documents.index)
+
     @timeit
     def _load_from_cache(self, cache):
         if self.recompute:
@@ -129,25 +136,21 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
             f'{self.ds_name}_{self.analyzer}_{self.ngram_range}.joblib'
         )
 
+    def transform_from_scratch(self, X):
+        logging.debug('Transforming from scratch')
+        return super().transform(X)
+
     @timeit
     def transform(self, raw_documents):
         try:
-            logging.debug('Transforming from cache')
-            self._load_from_cache(self.cache)
-            self._check_X(raw_documents)
-            return self.get_docs(raw_documents.index)
+            return self.transform_from_cache(raw_documents)
         except CacheError:
-            logging.debug('Transforming from scratch')
             return self.transform_from_scratch(raw_documents)
 
     @timeit
     def fit_transform(self, raw_documents, y=None):
         try:
-            logging.debug('Transforming from cache')
-            self._load_from_cache(self.cache)
-            self._check_X(raw_documents)
-            return self.get_docs(raw_documents.index)
-
+            return self.transform_from_cache(raw_documents)
         except CacheError:
             logging.debug('Transforming from scratch')
             self.feature_matrix = super().fit_transform(raw_documents)
@@ -161,9 +164,6 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
             #self.doc_md5 = hash_corpus(raw_documents)
             joblib.dump(self, self.cache)
             return self.feature_matrix
-
-    def transform_from_scratch(self, X):
-        return super().transform(X)
 
 
 class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
@@ -213,38 +213,37 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
              f'{self.pooling_method}.pkl')
         )
 
-    def fit(self, X):
+    def fit(self, X, y=None):
         self.fit_transform(X)
         return self
 
-    def fit_transform(self, X, y=None):
-        return self.transform(X)
+    def transform_from_scratch(self, raw_documents):
+        logging.debug('Transforming from scratch')
+        em = self._load_embedding_model()
+        return np.array([self._embed_doc(doc, em) for doc in raw_documents])
 
     @timeit
-    def transform(self, X, y=None):
+    def transform(self, raw_documents):
         try:
-            logging.debug('Transforming from cache')
-            self._load_from_cache(self.cache)
-            self._check_X(X)
-            return self.get_docs(X.index)
+            return self.transform_from_cache(raw_documents)
         except CacheError:
-            logging.debug('Transforming from scratch')
-            em = self._load_embedding_model()
-            logging.debug('Embedding documents')
-            self.feature_matrix = np.array([self._embed_doc(doc, em)
-                                            for doc in X])
+            return self.transform_from_scratch(raw_documents)
+
+    @timeit
+    def fit_transform(self, raw_documents, y=None):
+        try:
+            return self.transform_from_cache(raw_documents)
+        except CacheError:
+            self.feature_matrix = self.transform_from_scratch(raw_documents)
             # keep track of what index location of input maps to which row in
             # the feature matrix
             self.index_mapping = {
-                idx: i for i, idx in enumerate(X.index)
+                idx: i for i, idx in enumerate(raw_documents.index)
             }
             ## Store md5 sum of each doc to easily check later
-            self.doc_md5 = hash_corpus(X)
+            self.doc_md5 = hash_corpus(raw_documents)
             joblib.dump(self, self.cache)
             return self.feature_matrix
-
-    def transform_from_scratch(self, X):
-        return self.transform(X)
 
     @timeit
     def _load_embedding_model(self):
