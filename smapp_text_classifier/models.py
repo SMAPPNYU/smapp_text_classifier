@@ -102,7 +102,7 @@ class TextClassifier:
             self.classifier = RandomForestClassifier(max_features='auto')
             self.params.update(
                 {'clf__n_estimators': sp.stats.randint(10, 500),
-                 'clf__min_samples_split': sp.stats.randint(2, 20)}
+                 'clf__min_samples_split': sp.stats.uniform(0.0001, 0.1)}
             )
         elif self.algorithm == 'elasticnet':
             self.classifier = SGDClassifier(loss='log', penalty='elasticnet')

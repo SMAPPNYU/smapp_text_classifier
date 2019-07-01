@@ -269,7 +269,7 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         tokens = self.tokenize(doc)
         if not tokens:
             return np.zeros(self.dimensionality)
-        vectors = np.array([self._get_vector(t, model.wv) for t in tokens])
+        vectors = np.array([self._get_vector(t, model) for t in tokens])
         if self.pooling_method == 'mean':
             doc_vector = vectors.mean(axis=0)
         elif self.pooling_method == 'max':
