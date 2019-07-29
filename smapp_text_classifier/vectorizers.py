@@ -83,6 +83,8 @@ class CachedVectorizer:
         # Check the input documents have an index
         if not hasattr(X, 'index'):
             raise ValueError('X needs index if vectorized from cache')
+        if not X.index.is_unique:
+            raise ValueError('X needs a unique index (i.e. no duplicates)')
         # Check if all requested index elements are in the cache index
         if not all(X.index.isin(self.doc_md5.index)):
             logging.debug('Not all indices of new documents are in cache index.')
@@ -90,7 +92,9 @@ class CachedVectorizer:
         # Check if docs at index match docs in cache at index (5 sample docs)
         if self.feature_matrix is not None:
             logging.debug('Checking if cache matches index docs')
-            sample_idxs = np.random.choice(X.index, size=5, replace=False)
+            sample_idxs = np.random.choice(X.index, 
+                                           size=min(50, len(X.index)), 
+                                           replace=False)
             for idx in sample_idxs:
                 d_hash = hash_document(X.loc[idx])
                 if self.doc_md5['md5'].loc[idx] != d_hash:
