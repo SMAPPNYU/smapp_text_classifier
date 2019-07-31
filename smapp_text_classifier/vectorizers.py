@@ -81,13 +81,18 @@ class CachedVectorizer:
         '''Check if document input has an index and if raw_docs match
         the cached data'''
         # Check the input documents have an index
+        idx_er_msg = 'X needs to be a pandas object with a valid (unique) index'
         if not hasattr(X, 'index'):
-            raise ValueError('X needs index if vectorized from cache')
+            raise ValueError(idx_err_msg)
+        if not isinstance(X.index, pd.Index):
+            raise ValueError(idx_err_msg)
         if not X.index.is_unique:
-            raise ValueError('X needs a unique index (i.e. no duplicates)')
+            raise ValueError(idx_err_msg)
         # Check if all requested index elements are in the cache index
         if not all(X.index.isin(self.doc_md5.index)):
-            logging.debug('Not all indices of new documents are in cache index.')
+            logging.debug(
+                'Not all indices of new documents are in cache index.'
+            )
             raise CacheError()
         # Check if docs at index match docs in cache at index (5 sample docs)
         if self.feature_matrix is not None:
@@ -121,13 +126,13 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
     Attributes:
         cache_dir: str, directory to cache the vectorizer to
         ds_name: str, name of the dataset the vectorizer is fitted to
-        recompute: bool, ignore the cache if True
         ngram_range: tuple, see parent documentation
         analyzer: str, see parent documentation
+        recompute: bool, ignore the cache if True
         **kwargs: additional arguments passed to CountVectorizer, see parent
             documentation
     '''
-    def __init__(self, cache_dir='./', ds_name='test', ngram_range=(1, 1),
+    def __init__(self, cache_dir='./', ds_name='', ngram_range=(1, 1),
                  analyzer='word', recompute=False, **kwargs):
         super().__init__(ngram_range=ngram_range, analyzer=analyzer, **kwargs)
         self.ds_name = ds_name
