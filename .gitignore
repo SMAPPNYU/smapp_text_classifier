@@ -19,3 +19,6 @@ pipeline_demo/.ipynb_checkpoints/
 # data
 data
 data/*
+
+# OS specific files
+.DS_Store
