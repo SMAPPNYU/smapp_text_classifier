@@ -19,8 +19,9 @@ class CacheError(ValueError):
         msg = "Cache not found" if msg is None else msg
         super().__init__(msg)
 
-def hash_document(document):
-    encoded = document.encode('utf-8')
+def hash_document(string):
+    '''Calculate the md5 hash for a given string'''
+    encoded = string.encode('utf-8')
     return hashlib.md5(encoded).hexdigest()
 
 def hash_corpus(documents):
@@ -51,7 +52,6 @@ class CachedVectorizer:
 
     def transform_from_cache(self, raw_documents):
         logging.debug('Transforming from cache')
-        # TODO: this load might be unnecessary in some cases, build in a check
         self._load_from_cache(self.cache)
         self._check_X(raw_documents)
         return self.get_docs(raw_documents.index)
@@ -129,8 +129,9 @@ class CachedCountVectorizer(CountVectorizer, CachedVectorizer):
         ngram_range: tuple, see parent documentation
         analyzer: str, see parent documentation
         recompute: bool, ignore the cache if True
-        **kwargs: additional arguments passed to CountVectorizer, see parent
-            documentation
+        **kwargs: additional arguments passed to
+            sklearn.feature_extraction.text.CountVectorizer (e.g. to pass a
+            custom tokenizer)
     '''
     def __init__(self, cache_dir='./', ds_name='', ngram_range=(1, 1),
                  analyzer='word', recompute=False, **kwargs):
