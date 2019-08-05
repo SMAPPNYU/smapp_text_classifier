@@ -276,7 +276,10 @@ class CachedEmbeddingVectorizer(TransformerMixin, BaseEstimator,
         '''Calculate the document embedding by pooling the embedding of each
         token in the document
         '''
-        tokens = self.tokenize(doc)
+        if self.tokenize is not None:
+            tokens = self.tokenize(doc)
+        else:
+            tokens = doc.split()
         if not tokens:
             return np.zeros(self.dimensionality)
         vectors = np.array([self._get_vector(t, model) for t in tokens])
