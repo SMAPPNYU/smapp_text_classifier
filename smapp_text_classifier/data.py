@@ -1,22 +1,35 @@
 import json
-import shutil
 import copy
 
-import numpy as np
 import pandas as pd
 import spacy
 
-from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.model_selection import train_test_split
 
 class DataSet:
-    '''Data Set for the Sentiment Analysis Experiment + Pipeline
+    '''Representation of a data set for text classification pipeline
+
+    Attributes:
+    input_: Input dataset if not pre-split in train and test set. This can be a
+        pandas.DataFrame or a string pointing to a csv/tsv file or a json file
+        containing the input data.
+    train_input: str or pandas.DataFrame, if splitting in training and test set
+        should not be done (in case a specific split is pre-defined or training
+        and test data come in separate files) input for training data. If
+        provided `input_' must be None and `test_input' must be provided as
+        well.
+    test_input: str or pandas.DataFrame, see `train_input'.
+    name: str, name for the dataset for identification in experiments.
+    field_mapping: dict, Dictionary containing two fields: `text' and `label'
+        that identify the column (for tabular data) or field (for json data)
+        that contain the respective information.
+    test_size: float, proportion of documents to reserve as held-out test set.
+
     '''
 
-    def __init__(self, name, field_mapping,
-                 file_subset=None, test_size=0.25,
-                 na_rm=True, train_input=None,
-                 test_input=None, input_=None):
+    def __init__(self, input_=None, train_input=None, test_input=None,
+                 name='', field_mapping={'text': 'text', 'label': 'label'},
+                 file_subset=None, test_size=0.25):
 
         # Store inputs
         self.name = name
@@ -28,11 +41,11 @@ class DataSet:
 
         if input_ is not None:
             self.df = self.read_transform(input_)
-            if na_rm:
-                self.df.dropna(inplace=True)
+            self.df.dropna(inplace=True)
             self.df.reset_index(inplace=True, drop=True)
             self.train_idxs, self.test_idxs = train_test_split(
-                    range(len(self)), test_size=test_size)
+                range(len(self)), test_size=test_size
+            )
 
         elif train_input is not None:
             if input_ is not None:
@@ -46,11 +59,14 @@ class DataSet:
             test_df = self.read_transform(test_input)
             self.df = train_df.append(test_df)
             self.df.reset_index(inplace=True, drop=True)
-            if na_rm:
-                self.df.dropna(inplace=True)
+            self.df.dropna(inplace=True)
             self.train_idxs = list(range(train_df.shape[0]))
-            self.test_idxs = list(range(train_df.shape[0],
-                                         train_df.shape[0] + test_df.shape[0]))
+            self.test_idxs = list(
+                range(
+                    train_df.shape[0],
+                    train_df.shape[0] + test_df.shape[0]
+                )
+            )
         else:
             raise ValueError('Either `input_` or (`train_input`, `test_input`)'
                              ' have to be specified.')
@@ -67,7 +83,7 @@ class DataSet:
 
     def get_texts(self, set_):
         if set_ == "train":
-            return self.df_train['text' ]
+            return self.df_train['text']
         elif set_ == 'test':
             return self.df_test['text']
 
@@ -116,9 +132,8 @@ class DataSet:
         out = df[[self.field_mapping['label'],
                   self.field_mapping['text']]]
         out.columns = ['label', 'text']
-        return(out)
+        return out
 
-    # TODO: Not tested
     def read_from_json(self, inpath):
         with open(inpath) as infile:
             out = {'label': [], 'text': []}
@@ -129,8 +144,8 @@ class DataSet:
                         out['label'].append(doc[self.field_mapping['label']])
                         out['text'].append(doc[self.field_mapping['text']])
                 else:
-                        out['label'].append(doc[self.field_mapping['label']])
-                        out['text'].append(doc[self.field_mapping['text']])
+                    out['label'].append(doc[self.field_mapping['label']])
+                    out['text'].append(doc[self.field_mapping['text']])
 
         return pd.DataFrame(out)
 
